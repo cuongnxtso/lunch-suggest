@@ -1,0 +1,25 @@
+@page "/"
+@inject GroupSettings Group
+
+<PageTitle>LunchSuggest</PageTitle>
+
+<div class="landing">
+    <a href="today" class="choose-meal">
+        <span class="choose-meal-icon" aria-hidden="true">@Icon</span>
+        <span class="choose-meal-label">@L["Choose meal"]</span>
+    </a>
+</div>
+
+@code {
+    // Phở leads the set; one icon per day, the same for everyone that day.
+    static readonly string[] Icons = ["🍜", "🍲", "🍛", "🍚", "🍱", "🥟", "🍤", "🍗", "🥗", "🥖", "🍝", "🍣", "🥘", "🍢", "🌮", "🥙", "🍕", "🍔"];
+
+    string Icon => Icons[new Random(Today().DayNumber).Next(Icons.Length)];
+
+    // The group's day, so the icon changes at the team's midnight.
+    DateOnly Today()
+    {
+        var tz = Group.TimeZone is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z) ? z : TimeZoneInfo.Local;
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz));
+    }
+}

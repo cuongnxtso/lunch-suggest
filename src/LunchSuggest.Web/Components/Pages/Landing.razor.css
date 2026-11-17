@@ -1,0 +1,79 @@
+.landing {
+    min-height: calc(100vh - 8rem);
+    display: grid;
+    place-items: center;
+}
+
+.choose-meal {
+    position: relative;
+    width: clamp(15rem, 70vw, 20rem);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    text-decoration: none;
+    color: #fff;
+    background: radial-gradient(circle at 30% 25%, #ffd27a 0%, #ff8a3d 45%, #e8344e 100%);
+    box-shadow: 0 1.25rem 3rem rgba(232, 52, 78, .35), inset 0 -.6rem 1.5rem rgba(0, 0, 0, .15), inset 0 .6rem 1.5rem rgba(255, 255, 255, .35);
+    transition: transform .2s ease, box-shadow .2s ease;
+}
+
+    /* Soft pulsing ring behind the button. */
+    .choose-meal::after {
+        content: "";
+        position: absolute;
+        inset: -.75rem;
+        border-radius: 50%;
+        border: .35rem solid rgba(255, 138, 61, .45);
+        animation: pulse 2.4s ease-out infinite;
+        pointer-events: none;
+    }
+
+    .choose-meal:hover {
+        transform: scale(1.05);
+        box-shadow: 0 1.75rem 3.5rem rgba(232, 52, 78, .45), inset 0 -.6rem 1.5rem rgba(0, 0, 0, .15), inset 0 .6rem 1.5rem rgba(255, 255, 255, .35);
+        color: #fff;
+    }
+
+    .choose-meal:active {
+        transform: scale(.98);
+    }
+
+    .choose-meal:focus-visible {
+        outline: .3rem solid #0d6efd;
+        outline-offset: .6rem;
+    }
+
+.choose-meal-icon {
+    /* Color emoji fonts first; otherwise Windows can fall back to its black-and-white symbol font. */
+    font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+    font-size: clamp(5rem, 22vw, 7.5rem);
+    line-height: 1;
+    filter: drop-shadow(0 .4rem .5rem rgba(0, 0, 0, .25));
+    animation: float 3s ease-in-out infinite;
+}
+
+.choose-meal-label {
+    font-size: clamp(1.25rem, 5vw, 1.6rem);
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    text-shadow: 0 .15rem .4rem rgba(0, 0, 0, .3);
+}
+
+@keyframes pulse {
+    0% { transform: scale(.95); opacity: 1; }
+    100% { transform: scale(1.15); opacity: 0; }
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-.5rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .choose-meal, .choose-meal::after, .choose-meal-icon { animation: none; transition: none; }
+}

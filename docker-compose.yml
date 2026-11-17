@@ -1,0 +1,53 @@
+# Everything LunchSuggest needs. `docker compose up -d --build` serves the site on port 8686 of this machine (all network interfaces).
+# Only "web" is reachable from the LAN; the database, Ollama and SearXNG stay on 127.0.0.1.
+services:
+  web:
+    build: .
+    ports: ["8686:8080"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Lunch: Host=db;Port=5432;Database=lunch;Username=lunch;Password=lunch
+      Search__OllamaUrl: http://ollama:11434
+      Dishes__SearxngUrl: http://searxng:8080
+    volumes: [dpkeys:/keys]
+    depends_on:
+      db: { condition: service_healthy }
+      ollama: { condition: service_started }
+      searxng: { condition: service_started }
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: lunch
+      POSTGRES_PASSWORD: lunch
+      POSTGRES_DB: lunch
+    ports: ["127.0.0.1:5442:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lunch -d lunch"]
+      interval: 5s
+      retries: 12
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["127.0.0.1:11434:11434"]
+    volumes: [ollama:/root/.ollama]
+    # Pull both models on first start (~2.3 GB together), then keep serving.
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 3 && ollama pull nomic-embed-text && ollama pull qwen2.5:3b && wait"]
+    restart: unless-stopped
+
+  # Meta search engine with a JSON API, used to find each place's top dishes. Free, no key.
+  searxng:
+    image: searxng/searxng:latest
+    ports: ["127.0.0.1:8888:8080"]
+    environment:
+      SEARXNG_SECRET: local-dev-only-change-me
+    volumes: ["./searxng/settings.yml:/etc/searxng/settings.yml:ro"]
+    restart: unless-stopped
+
+volumes:
+  pgdata: {}
+  ollama: {}
+  dpkeys: {}

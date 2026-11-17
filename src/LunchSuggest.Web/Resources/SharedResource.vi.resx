@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vietnamese UI text. Keys are the English text used in the Razor pages (English needs no file).
+     A unit test fails if a page uses a key that is missing here. -->
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="1 vote" xml:space="preserve"><value>1 phiếu</value></data>
+  <data name="A poll can have at most {0} options." xml:space="preserve"><value>Mỗi cuộc bình chọn có tối đa {0} lựa chọn.</value></data>
+  <data name="Add place" xml:space="preserve"><value>Thêm quán</value></data>
+  <data name="Add this dish to the poll" xml:space="preserve"><value>Thêm món này vào bình chọn</value></data>
+  <data name="Almost won on an earlier day" xml:space="preserve"><value>Suýt thắng ở một ngày trước</value></data>
+  <data name="An error occurred while processing your request." xml:space="preserve"><value>Đã xảy ra lỗi khi xử lý yêu cầu của bạn.</value></data>
+  <data name="An unhandled error has occurred." xml:space="preserve"><value>Đã xảy ra lỗi không mong muốn.</value></data>
+  <data name="Burger or pizza" xml:space="preserve"><value>Burger hoặc pizza</value></data>
+  <data name="Choose meal" xml:space="preserve"><value>Chọn món</value></data>
+  <data name="Close" xml:space="preserve"><value>Đóng</value></data>
+  <data name="Coffee and a sandwich" xml:space="preserve"><value>Cà phê &amp; bánh mì</value></data>
+  <data name="Copied!" xml:space="preserve"><value>Đã sao chép!</value></data>
+  <data name="Copy invite link" xml:space="preserve"><value>Sao chép đường dẫn mời</value></data>
+  <data name="Couldn't copy. Select the link and copy it manually." xml:space="preserve"><value>Không sao chép được. Hãy chọn đường dẫn và sao chép thủ công.</value></data>
+  <data name="Couldn't load nearby places from the map provider. Try reloading in a minute." xml:space="preserve"><value>Không tải được danh sách quán ăn gần đây. Hãy tải lại trang sau ít phút.</value></data>
+  <data name="Deciding the lunch…" xml:space="preserve"><value>Đang chốt món trưa…</value></data>
+  <data name="Describe what you want to eat" xml:space="preserve"><value>Mô tả món bạn muốn ăn</value></data>
+  <data name="Error" xml:space="preserve"><value>Lỗi</value></data>
+  <data name="Error." xml:space="preserve"><value>Lỗi.</value></data>
+  <data name="Failed to rejoin." xml:space="preserve"><value>Không kết nối lại được.</value></data>
+  <data name="Failed to resume the session." xml:space="preserve"><value>Không thể tiếp tục phiên làm việc.</value></data>
+  <data name="Few places on the map within {0} m, so the nearest ones up to {1} m are included too." xml:space="preserve"><value>Trong bán kính {0} m có ít quán, nên danh sách có thêm các quán gần nhất trong vòng {1} m.</value></data>
+  <data name="Finding food places nearby… (first load of an area can take a few seconds)" xml:space="preserve"><value>Đang tìm quán ăn gần đây… (lần đầu ở khu vực mới có thể mất vài giây)</value></data>
+  <data name="Finding top dishes…" xml:space="preserve"><value>Đang tìm món nổi bật…</value></data>
+  <data name="For today, voting until {0}. One poll a day." xml:space="preserve"><value>Cho hôm nay, bình chọn đến {0}. Mỗi ngày một cuộc bình chọn.</value></data>
+  <data name="For tomorrow, {0}, voting until {1}. One poll a day." xml:space="preserve"><value>Cho ngày mai ({0}), bình chọn đến {1}. Mỗi ngày một cuộc bình chọn.</value></data>
+  <data name="Invite link" xml:space="preserve"><value>Đường dẫn mời</value></data>
+  <data name="It may come back in the next few days." xml:space="preserve"><value>Món này có thể quay lại trong vài ngày tới.</value></data>
+  <data name="Language" xml:space="preserve"><value>Ngôn ngữ</value></data>
+  <data name="Loading…" xml:space="preserve"><value>Đang tải…</value></data>
+  <data name="Lunch on {0}" xml:space="preserve"><value>Bữa trưa ngày {0}</value></data>
+  <data name="Lunch poll" xml:space="preserve"><value>Bình chọn bữa trưa</value></data>
+  <data name="No dishes found online for this place." xml:space="preserve"><value>Không tìm thấy món nào trên mạng cho quán này.</value></data>
+  <data name="No food places found in this radius." xml:space="preserve"><value>Không tìm thấy quán ăn nào trong bán kính này.</value></data>
+  <data name="No lunch was decided." xml:space="preserve"><value>Chưa chốt được món trưa.</value></data>
+  <data name="No matches yet. If this area was just loaded, the search index may still be building; try again in a moment." xml:space="preserve"><value>Chưa có kết quả phù hợp. Nếu khu vực này vừa được tải, chỉ mục tìm kiếm có thể vẫn đang được xây dựng; hãy thử lại sau giây lát.</value></data>
+  <data name="No options yet. Add dishes or places from the list." xml:space="preserve"><value>Chưa có lựa chọn nào. Hãy thêm món hoặc quán từ danh sách.</value></data>
+  <data name="No poll for {0} yet." xml:space="preserve"><value>Chưa có cuộc bình chọn cho {0}.</value></data>
+  <data name="Nobody voted, so the dice chose." xml:space="preserve"><value>Không ai bình chọn nên xúc xắc đã quyết định.</value></data>
+  <data name="Noodle soup" xml:space="preserve"><value>Món nước (phở, bún)</value></data>
+  <data name="Not Found" xml:space="preserve"><value>Không tìm thấy</value></data>
+  <data name="Only today's and tomorrow's polls can change." xml:space="preserve"><value>Chỉ có thể thay đổi bình chọn của hôm nay và ngày mai.</value></data>
+  <data name="Pick one option at random (from the poll, or from the list if the poll is empty)" xml:space="preserve"><value>Chọn ngẫu nhiên một lựa chọn (trong cuộc bình chọn, hoặc từ danh sách nếu chưa có lựa chọn nào)</value></data>
+  <data name="Picked at random by {0}." xml:space="preserve"><value>{0} đã chọn ngẫu nhiên.</value></data>
+  <data name="Picked at random when the poll was created" xml:space="preserve"><value>Được chọn ngẫu nhiên khi tạo cuộc bình chọn</value></data>
+  <data name="Picking dishes… looking up menus near you (can take a minute the first time)." xml:space="preserve"><value>Đang chọn món… đang tra thực đơn quanh bạn (lần đầu có thể mất khoảng một phút).</value></data>
+  <data name="Please retry or reload the page." xml:space="preserve"><value>Vui lòng thử lại hoặc tải lại trang.</value></data>
+  <data name="Poll created by {0}" xml:space="preserve"><value>{0} đã tạo cuộc bình chọn này</value></data>
+  <data name="Poll for {0} ({1})" xml:space="preserve"><value>Bình chọn ngày {0} ({1})</value></data>
+  <data name="Rejoin failed... trying again in" xml:space="preserve"><value>Kết nối lại thất bại... thử lại sau</value></data>
+  <data name="Rejoining the server..." xml:space="preserve"><value>Đang kết nối lại máy chủ...</value></data>
+  <data name="Reload" xml:space="preserve"><value>Tải lại</value></data>
+  <data name="Resume" xml:space="preserve"><value>Tiếp tục</value></data>
+  <data name="Retry" xml:space="preserve"><value>Thử lại</value></data>
+  <data name="Rice &amp; grilled meat" xml:space="preserve"><value>Cơm &amp; đồ nướng</value></data>
+  <data name="Runner-up:" xml:space="preserve"><value>Về nhì:</value></data>
+  <data name="Searching…" xml:space="preserve"><value>Đang tìm…</value></data>
+  <data name="Semantic search is unavailable right now (is the embedding service running?)." xml:space="preserve"><value>Tìm kiếm theo ý nghĩa tạm thời không hoạt động.</value></data>
+  <data name="Something light &amp; healthy" xml:space="preserve"><value>Món nhẹ, healthy</value></data>
+  <data name="Something went wrong. Please try again." xml:space="preserve"><value>Đã có lỗi xảy ra. Vui lòng thử lại.</value></data>
+  <data name="Sorry, the content you are looking for does not exist." xml:space="preserve"><value>Xin lỗi, nội dung bạn tìm không tồn tại.</value></data>
+  <data name="Suggest" xml:space="preserve"><value>Gợi ý</value></data>
+  <data name="That didn't work. Reload the page and try again." xml:space="preserve"><value>Không thực hiện được. Hãy tải lại trang và thử lại.</value></data>
+  <data name="That isn't a valid poll date. Use the link from the app, e.g. /poll/2026-11-18." xml:space="preserve"><value>Ngày bình chọn không hợp lệ. Hãy dùng đường dẫn từ ứng dụng, ví dụ /poll/2026-11-18.</value></data>
+  <data name="That option isn't in this poll. Reload the page." xml:space="preserve"><value>Lựa chọn này không còn trong cuộc bình chọn. Hãy tải lại trang.</value></data>
+  <data name="The lunch group isn't set up. Check the &quot;Lunch&quot; section in the app settings." xml:space="preserve"><value>Nhóm ăn trưa chưa được thiết lập. Hãy kiểm tra mục "Lunch" trong cấu hình ứng dụng.</value></data>
+  <data name="The poll had no options when it closed at {0}." xml:space="preserve"><value>Cuộc bình chọn không có lựa chọn nào khi đóng lúc {0}.</value></data>
+  <data name="The session has been paused by the server." xml:space="preserve"><value>Máy chủ đã tạm dừng phiên làm việc.</value></data>
+  <data name="There's no poll for that day yet. Create one first." xml:space="preserve"><value>Ngày này chưa có cuộc bình chọn. Hãy tạo trước.</value></data>
+  <data name="This poll closed at {0}." xml:space="preserve"><value>Cuộc bình chọn này đã đóng lúc {0}.</value></data>
+  <data name="Tied at {0}, so the dice broke the tie." xml:space="preserve"><value>Hòa nhau với {0}, xúc xắc đã phân định.</value></data>
+  <data name="Today's lunch" xml:space="preserve"><value>Bữa trưa hôm nay</value></data>
+  <data name="Today's poll ({0})" xml:space="preserve"><value>Bình chọn hôm nay ({0})</value></data>
+  <data name="Tomorrow's poll ({0})" xml:space="preserve"><value>Bình chọn ngày mai ({0})</value></data>
+  <data name="Vegetarian" xml:space="preserve"><value>Đồ chay</value></data>
+  <data name="Vote" xml:space="preserve"><value>Bình chọn</value></data>
+  <data name="Voted" xml:space="preserve"><value>Đã chọn</value></data>
+  <data name="Voting closed at {0}." xml:space="preserve"><value>Bình chọn đã đóng lúc {0}.</value></data>
+  <data name="Voting for {0} would have closed at {1}." xml:space="preserve"><value>Bình chọn cho {0} đã đóng lúc {1}.</value></data>
+  <data name="What do you feel like? e.g. spicy noodle soup, something light…" xml:space="preserve"><value>Hôm nay bạn thèm gì? Ví dụ: bún cay, món gì đó nhẹ nhàng…</value></data>
+  <data name="You're" xml:space="preserve"><value>Bạn là</value></data>
+  <data name="added by {0}" xml:space="preserve"><value>{0} đã thêm</value></data>
+  <data name="at" xml:space="preserve"><value>tại</value></data>
+  <data name="ddd d MMM" xml:space="preserve"><value>dd/MM</value></data>
+  <data name="dddd d MMM" xml:space="preserve"><value>dddd, dd/MM</value></data>
+  <data name="in poll" xml:space="preserve"><value>đã thêm</value></data>
+  <data name="leading" xml:space="preserve"><value>dẫn đầu</value></data>
+  <data name="less than a minute left" xml:space="preserve"><value>còn chưa đến một phút</value></data>
+  <data name="match {0}" xml:space="preserve"><value>khớp {0}</value></data>
+  <data name="seconds." xml:space="preserve"><value>giây.</value></data>
+  <data name="show all nearby" xml:space="preserve"><value>xem tất cả quán gần đây</value></data>
+  <data name="today" xml:space="preserve"><value>hôm nay</value></data>
+  <data name="tomorrow" xml:space="preserve"><value>ngày mai</value></data>
+  <data name="{0} h {1} min left" xml:space="preserve"><value>còn {0} giờ {1} phút</value></data>
+  <data name="{0} min left" xml:space="preserve"><value>còn {0} phút</value></data>
+  <data name="{0} votes" xml:space="preserve"><value>{0} phiếu</value></data>
+  <data name="— picked at random by {0}" xml:space="preserve"><value>— {0} đã chọn ngẫu nhiên</value></data>
+  <data name="← Back to today" xml:space="preserve"><value>← Về hôm nay</value></data>
+  <data name="↩ runner-up" xml:space="preserve"><value>↩ về nhì</value></data>
+  <data name="⏰ Voting closes at {0} · {1}" xml:space="preserve"><value>⏰ Bình chọn đóng lúc {0} · {1}</value></data>
+  <data name="⏰ Voting closes tomorrow at {0} · {1}" xml:space="preserve"><value>⏰ Bình chọn đóng lúc {0} ngày mai · {1}</value></data>
+  <data name="➕ Create new poll" xml:space="preserve"><value>➕ Tạo bình chọn mới</value></data>
+  <data name="🍜 Find top dishes" xml:space="preserve"><value>🍜 Tìm món nổi bật</value></data>
+  <data name="🎉 Lunch:" xml:space="preserve"><value>🎉 Bữa trưa:</value></data>
+  <data name="🎲 New name" xml:space="preserve"><value>🎲 Đổi tên</value></data>
+  <data name="🎲 Random pick" xml:space="preserve"><value>🎲 Chọn ngẫu nhiên</value></data>
+  <data name="🎲 picked for you" xml:space="preserve"><value>🎲 gợi ý ngẫu nhiên</value></data>
+  <data name="🗳️ Open today's poll →" xml:space="preserve"><value>🗳️ Mở bình chọn hôm nay →</value></data>
+  <data name="🗳️ Open tomorrow's poll →" xml:space="preserve"><value>🗳️ Mở bình chọn ngày mai →</value></data>
+  <data name="🧭 Directions" xml:space="preserve"><value>🧭 Chỉ đường</value></data>
+</root>

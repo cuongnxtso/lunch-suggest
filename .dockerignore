@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+.verify-bin/
+.ef-bin/
+.vs/
+.vscode/
+.claude/
+.git/
+tests/
+searxng/
+docker-compose.yml
+Dockerfile
+*.md

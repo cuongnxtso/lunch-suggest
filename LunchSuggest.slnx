@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LunchSuggest.Web/LunchSuggest.Web.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Dishes/">
+    <Project Path="src/Modules/Dishes/LunchSuggest.Modules.Dishes.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Places/">
+    <Project Path="src/Modules/Places/LunchSuggest.Modules.Places.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Search/">
+    <Project Path="src/Modules/Search/LunchSuggest.Modules.Search.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Voting/">
+    <Project Path="src/Modules/Voting/LunchSuggest.Modules.Voting.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LunchSuggest.Tests/LunchSuggest.Tests.csproj" />
+  </Folder>
+</Solution>

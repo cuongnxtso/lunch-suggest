@@ -1,0 +1,663 @@
+@page "/today"
+@page "/poll/{DayText}"
+@implements IAsyncDisposable
+@using System.Globalization
+@inject GroupSettings Group
+@inject ILunchSessions Sessions
+@inject IPlaceDirectory Places
+@inject ISemanticIndex Search
+@inject IDishGuide Dishes
+@inject TodayPicker Picker
+@inject ProtectedLocalStorage Storage
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ILogger<Session> Log
+
+<PageTitle>@(session?.Title ?? L["Lunch poll"])</PageTitle>
+
+@if (notFound is not null)
+{
+    <div class="alert alert-warning">@notFound</div>
+}
+else if (session is null)
+{
+    <p>@L["Loading…"]</p>
+}
+else
+{
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div class="me-auto">
+            <h1 class="h3 mb-0">@session.Title <small class="text-muted fs-6">· @LongDate(session.Day)</small></h1>
+            @if (Group.Address is { Length: > 0 }) { <div class="small text-muted">📍 @Group.Address</div> }
+            @if (session.Day != session.Today)
+            {
+                <button class="btn btn-link btn-sm p-0" @onclick='() => Go("today")'>@L["← Back to today"]</button>
+            }
+        </div>
+        <input class="form-control form-control-sm" style="max-width: 22rem" readonly value="@Nav.Uri" aria-label="@L["Invite link"]" />
+        <button class="btn btn-sm btn-outline-primary" @onclick="CopyLink">@(copied ? L["Copied!"] : L["Copy invite link"])</button>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="alert alert-warning alert-dismissible" role="alert">
+            @error <button type="button" class="btn-close" aria-label="@L["Close"]" @onclick="() => error = null"></button>
+        </div>
+    }
+
+    @if ((session.IsOpen || !session.NextPollExists) && me is { Name.Length: > 0 })
+    {
+        <p class="small text-muted">
+            @L["You're"] <strong>@me.Name</strong> ·
+            <button class="btn btn-link btn-sm p-0 align-baseline" @onclick="NewName">@L["🎲 New name"]</button>
+        </p>
+    }
+
+    @if (!session.HasPoll)
+    {
+        <section class="text-center py-4">
+            <div class="display-1" aria-hidden="true">🗳️</div>
+            <p class="lead mb-1">@L["No poll for {0} yet.", DayLabel(session.Day)]</p>
+            @if (session.Closed)
+            {
+                <p class="text-muted">@L["Voting for {0} would have closed at {1}.", DayLabel(session.Day), Time(session.Deadline)]</p>
+            }
+        </section>
+        @NextPollPanel
+    }
+    else if (session.Closed)
+    {
+        @if (picking || closing)
+        {
+            <div class="text-center py-5" role="status">
+                <div class="spinner-border text-warning mb-3" style="width: 3rem; height: 3rem" aria-hidden="true"></div>
+                <p class="lead">@L["Deciding the lunch…"]</p>
+            </div>
+        }
+        else if (session.Winner is { } w)
+        {
+            var runnerUp = session.Candidates.Where(c => c.Id != w.Id && c.VoterNames.Count > 0).OrderByDescending(c => c.VoterNames.Count).FirstOrDefault();
+            <section class="result text-center py-4" aria-live="polite">
+                <div class="result-medal"><span class="result-icon" aria-hidden="true">@DishIcon.For(w.Dish, w.Name, w.Cuisine)</span></div>
+                <div class="result-kicker mt-4">@(session.Day == session.Today ? L["Today's lunch"] : L["Lunch on {0}", ShortDate(session.Day)])</div>
+                <h2 class="display-5 fw-bold mb-1">@(w.Dish ?? w.Name)</h2>
+                @if (w.Dish is not null) { <p class="lead mb-1">@L["at"] <strong>@w.Name</strong></p> }
+                <p class="text-muted">@WinReason(w)</p>
+                <a class="btn btn-primary btn-lg rounded-pill px-4" href="@DirectionsUrl(w)" target="_blank" rel="noopener">@L["🧭 Directions"]</a>
+                @if (runnerUp is not null)
+                {
+                    <p class="small text-muted mt-4 mb-1">
+                        @L["Runner-up:"] <strong>@OptionTitle(runnerUp)</strong> (@Votes(runnerUp.VoterNames.Count)). @L["It may come back in the next few days."]
+                    </p>
+                }
+                <p class="small text-muted">@L["Voting closed at {0}.", Time(session.Deadline)]</p>
+            </section>
+        }
+        else
+        {
+            <div class="text-center py-5">
+                <div class="display-1" aria-hidden="true">🤷</div>
+                <p class="lead">@L["No lunch was decided."]</p>
+                <p class="text-muted">@L["The poll had no options when it closed at {0}.", Time(session.Deadline)]</p>
+            </div>
+        }
+        @if (session.Day == session.Today) { @NextPollPanel }
+    }
+    else
+    {
+    @if (session.ClosesAt is { } closesAt)
+    {
+        var left = closesAt - DateTimeOffset.UtcNow;
+        <div class="alert @(left < TimeSpan.FromMinutes(15) ? "alert-warning" : "alert-info") py-2" role="status">
+            @(session.Day == session.Today
+                ? L["⏰ Voting closes at {0} · {1}", Time(session.Deadline), TimeLeft(left)]
+                : L["⏰ Voting closes tomorrow at {0} · {1}", Time(session.Deadline), TimeLeft(left)])
+        </div>
+    }
+
+    @if (Picked is { } picked)
+    {
+        <div class="alert alert-success picked-banner" role="status">
+            @L["🎉 Lunch:"] <strong>@OptionTitle(picked)</strong> @(picked.Cuisine is null ? "" : $"({picked.Cuisine})")
+            <span class="small text-muted">@L["— picked at random by {0}", picked.PickedBy ?? ""]</span>
+        </div>
+    }
+
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <div @ref="mapEl" class="map mb-3"></div>
+
+            <form class="input-group mb-2" @onsubmit="RunSearch">
+                <input class="form-control" placeholder="@L["What do you feel like? e.g. spicy noodle soup, something light…"]" @bind="query" aria-label="@L["Describe what you want to eat"]" />
+                <button class="btn btn-primary" type="submit" disabled="@searching">@(searching ? L["Searching…"] : L["Suggest"])</button>
+            </form>
+            <div class="mb-2 d-flex flex-wrap gap-1">
+                @foreach (var idea in Ideas)
+                {
+                    var on = selectedIdeas.Contains(idea);
+                    <button class="btn btn-sm @(on ? "btn-secondary" : "btn-outline-secondary")" aria-pressed="@(on ? "true" : "false")"
+                            disabled="@searching" @onclick="() => ToggleIdea(idea)">@(on ? "✓ " : "")@L[idea]</button>
+                }
+                @if (scores is not null)
+                {
+                    <button class="btn btn-sm btn-link" @onclick="ClearSearch">@L["show all nearby"]</button>
+                }
+            </div>
+
+            @if (loadingPlaces)
+            {
+                <p class="text-muted">@L["Finding food places nearby… (first load of an area can take a few seconds)"]</p>
+            }
+            else if (shown.Count == 0)
+            {
+                <p class="text-muted">@(scores is null ? L["No food places found in this radius."] : L["No matches yet. If this area was just loaded, the search index may still be building; try again in a moment."])</p>
+            }
+            else
+            {
+                @if (SearchRadius > session.RadiusMeters && scores is null)
+                {
+                    <p class="small text-muted mb-1">@L["Few places on the map within {0} m, so the nearest ones up to {1} m are included too.", session.RadiusMeters, SearchRadius]</p>
+                }
+                <ul class="list-group place-list">
+                    @foreach (var p in shown)
+                    {
+                        <li class="list-group-item">
+                          <div class="d-flex align-items-center gap-2">
+                            <div class="me-auto">
+                                <div class="fw-semibold">@p.Name</div>
+                                <div class="small text-muted">
+                                    @p.Category@(p.Cuisine is null ? "" : $" · {p.Cuisine}") · @($"{p.DistanceMeters:F0} m")
+                                    @if (scores?.GetValueOrDefault(p.Id) is double s) { <span> · @L["match {0}", s.ToString("P0")]</span> }
+                                    @if (matchedBy?.GetValueOrDefault(p.Id) is { } terms)
+                                    {
+                                        @foreach (var t in terms) { <span class="badge text-bg-light border ms-1">@L[t]</span> }
+                                    }
+                                </div>
+                            </div>
+                            @if (InPoll(p.Id, null))
+                            {
+                                <span class="badge text-bg-primary">@L["in poll"]</span>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-primary" disabled="@(!CanAct)" @onclick="() => AddCandidate(p)">@L["Add place"]</button>
+                            }
+                          </div>
+                          @if (dishes.GetValueOrDefault(p.Id) is { } top)
+                          {
+                              if (top.Count == 0)
+                              {
+                                  <div class="small text-muted mt-1">@L["No dishes found online for this place."]</div>
+                              }
+                              else
+                              {
+                                  <div class="d-flex flex-wrap gap-1 mt-1">
+                                      @foreach (var dish in top)
+                                      {
+                                          if (InPoll(p.Id, dish))
+                                          {
+                                              <span class="badge text-bg-primary align-self-center">✓ @dish</span>
+                                          }
+                                          else
+                                          {
+                                              <button class="btn btn-sm btn-outline-success py-0" disabled="@(!CanAct)" title="@L["Add this dish to the poll"]"
+                                                      @onclick="() => AddCandidate(p, dish)">+ @dish</button>
+                                          }
+                                      }
+                                  </div>
+                              }
+                          }
+                          else if (Dishes.IsPending(p.Id))
+                          {
+                              <div class="small text-muted mt-1" role="status">
+                                  <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>@L["Finding top dishes…"]
+                              </div>
+                          }
+                          else
+                          {
+                              <button class="btn btn-link btn-sm p-0 mt-1" @onclick="() => RequestDishes(p)">@L["🍜 Find top dishes"]</button>
+                          }
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header d-flex align-items-center">
+                    <span class="me-auto fw-semibold">@PollHeading()</span>
+                    <button class="btn btn-sm btn-warning" disabled="@(!CanAct || (session.Candidates.Count == 0 && shown.Count == 0))" @onclick="PickRandom"
+                            title="@L["Pick one option at random (from the poll, or from the list if the poll is empty)"]">@L["🎲 Random pick"]</button>
+                </div>
+                @if (picking)
+                {
+                    <div class="card-body text-muted" role="status">
+                        <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                        @L["Picking dishes… looking up menus near you (can take a minute the first time)."]
+                    </div>
+                }
+                else if (session.Candidates.Count == 0)
+                {
+                    <div class="card-body text-muted">@L["No options yet. Add dishes or places from the list."]</div>
+                }
+                <ul class="list-group list-group-flush">
+                    @foreach (var c in session.Candidates)
+                    {
+                        var leader = c.VoterNames.Count > 0 && c.VoterNames.Count == session.Candidates.Max(x => x.VoterNames.Count);
+                        <li class="list-group-item @(c.PickedBy is not null ? "list-group-item-success" : "")">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="me-auto">
+                                    <span class="fw-semibold">@(c.Dish ?? c.Name)</span>
+                                    @if (leader) { <span class="badge text-bg-success ms-1">@L["leading"]</span> }
+                                    <div class="small text-muted">
+                                        @(c.Dish is null ? "" : $"{L["at"]} {c.Name}")@(c.Cuisine is null ? "" : $" · {c.Cuisine}")
+                                        @switch (c.AddedBy)
+                                        {
+                                            case CandidateSource.RunnerUp: <span class="badge text-bg-warning ms-1" title="@L["Almost won on an earlier day"]">@L["↩ runner-up"]</span> break;
+                                            case CandidateSource.Random: <span class="badge text-bg-info ms-1" title="@L["Picked at random when the poll was created"]">@L["🎲 picked for you"]</span> break;
+                                            default: <span> · @L["added by {0}", c.AddedBy]</span> break;
+                                        }
+                                    </div>
+                                </div>
+                                <span class="badge rounded-pill text-bg-secondary">@c.VoterNames.Count</span>
+                                <button class="btn btn-sm @(c.VotedByMe ? "btn-primary" : "btn-outline-primary")" disabled="@(!CanAct)"
+                                        @onclick="() => ToggleVote(c)" aria-pressed="@(c.VotedByMe ? "true" : "false")">👍 @(c.VotedByMe ? L["Voted"] : L["Vote"])</button>
+                            </div>
+                            @if (c.VoterNames.Count > 0)
+                            {
+                                <div class="small text-muted mt-1">@string.Join(", ", c.VoterNames)</div>
+                            }
+                        </li>
+                    }
+                </ul>
+                @if (session.CreatedBy is { } by && by != "app") @* "app" = polls from before the Create button existed *@
+                {
+                    <div class="card-footer small text-muted">@L["Poll created by {0}", by]</div>
+                }
+            </div>
+        </div>
+    </div>
+    }
+}
+
+@code {
+    [Parameter] public string? DayText { get; set; }
+
+    string Code => Group.Code;
+
+    // English text doubles as the translation key (shown via L) and as the search query, which the English embedding model reads best.
+    static readonly string[] Ideas = ["Noodle soup", "Rice & grilled meat", "Something light & healthy", "Vegetarian", "Burger or pizza", "Coffee and a sandwich"];
+
+    sealed class Voter { public string Id { get; set; } = ""; public string Name { get; set; } = ""; }
+
+    SessionView? session;
+    DateOnly? day; // null = today
+    string? notFound;
+    bool loadingPlaces = true, searching, copied, picking, closing, creating;
+    Timer? clock; // ticks the countdown and flips the page to the result at the deadline
+    IReadOnlyList<PlaceInfo> nearby = [], shown = [];
+    Dictionary<string, double>? scores; // null = not searching
+    Dictionary<string, List<string>>? matchedBy; // which search terms each place matched, when there are several
+    readonly HashSet<string> selectedIdeas = [];
+    // Top dishes per place id (empty list = looked up, none found). The first few listed places are looked up automatically.
+    readonly Dictionary<string, IReadOnlyList<string>> dishes = [];
+    const int AutoDishLookups = 8;
+    string query = "";
+    string? error;
+    Voter? me;
+    ElementReference mapEl;
+    IJSObjectReference? module, map;
+    bool mapStarted;
+
+    bool CanAct => me is { Name.Length: > 0 };
+    // The Places module may widen the radius in sparse areas; search must cover the same ground.
+    int SearchRadius => Math.Max(session?.RadiusMeters ?? 0, (int)Math.Ceiling(nearby.Count == 0 ? 0 : nearby.Max(p => p.DistanceMeters)));
+    CandidateView? Picked => session?.Picked;
+    bool InPoll(string placeId, string? dish) => session!.Candidates.Any(c => c.PlaceId == placeId && c.Dish == dish);
+
+    string DayLabel(DateOnly d) =>
+        d == session!.Today ? L["today"] : d == session.Today.AddDays(1) ? L["tomorrow"] : ShortDate(d);
+
+    // Date patterns are translations too: "Tuesday 17 Nov" in English, "Thứ Ba, 17/11" in Vietnamese.
+    string LongDate(DateOnly d) => d.ToString(L["dddd d MMM"].Value, CultureInfo.CurrentCulture);
+    string ShortDate(DateOnly d) => d.ToString(L["ddd d MMM"].Value, CultureInfo.CurrentCulture);
+    static string Time(TimeOnly? t) => t?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? "";
+
+    string OptionTitle(CandidateView c) => c.Dish is null ? c.Name : $"{c.Dish} {L["at"]} {c.Name}";
+
+    string PollHeading() =>
+        session!.Day == session.Today ? L["Today's poll ({0})", session.Candidates.Count]
+        : session.Day == session.Today.AddDays(1) ? L["Tomorrow's poll ({0})", session.Candidates.Count]
+        : L["Poll for {0} ({1})", ShortDate(session.Day), session.Candidates.Count];
+
+    /// <summary>"Create new poll" (one poll a day), or a way to the next poll if it already exists.</summary>
+    RenderFragment NextPollPanel => __builder =>
+    {
+        var next = session!.NextPollDay;
+        if (!session.NextPollExists)
+        {
+            <div class="text-center my-4">
+                <button class="btn btn-success btn-lg rounded-pill px-5 py-3 fw-semibold" disabled="@(!CanAct || creating)" @onclick="CreatePoll">
+                    @if (creating) { <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span> }
+                    @L["➕ Create new poll"]
+                </button>
+                <p class="small text-muted mt-2 mb-0">
+                    @(next == session.Today
+                        ? L["For today, voting until {0}. One poll a day.", Time(session.Deadline)]
+                        : L["For tomorrow, {0}, voting until {1}. One poll a day.", LongDate(next), Time(session.Deadline)])
+                </p>
+            </div>
+        }
+        else if (next != session.Day)
+        {
+            <div class="text-center my-4">
+                <button class="btn btn-outline-success btn-lg rounded-pill px-4" @onclick='() => Go($"poll/{next:yyyy-MM-dd}")'>
+                    @(next == session.Today ? L["🗳️ Open today's poll →"] : L["🗳️ Open tomorrow's poll →"])
+                </button>
+            </div>
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (DayText is not null)
+        {
+            if (!DateOnly.TryParseExact(DayText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            {
+                notFound = L["That isn't a valid poll date. Use the link from the app, e.g. /poll/2026-11-18."];
+                return;
+            }
+            day = parsed;
+        }
+
+        // Browser-side identity: a random id + a random fun name ("Chuột Lang Nước Thư Thái"). Not auth; anyone with the link can vote.
+        // (JS storage works here because the page isn't prerendered.)
+        try { me = (await Storage.GetAsync<Voter>("voter")).Value; }
+        catch (System.Security.Cryptography.CryptographicException) { } // data-protection keys changed
+        me ??= new Voter { Id = Guid.NewGuid().ToString("N") };
+        if (me.Name.Length == 0) await NewName();
+
+        session = await Sessions.GetAsync(Code, day, me.Id);
+        if (session is null) { notFound = L["The lunch group isn't set up. Check the \"Lunch\" section in the app settings."]; return; }
+        Sessions.Changed += OnSessionChanged;
+        Dishes.LookupFinished += OnDishLookupFinished;
+        if (!session.HasPoll) return; // nothing to load until someone creates the poll
+        picking = !session.Seeded;
+        StateHasChanged();
+
+        // Already closed and decided: just show the result, no map or dish lookups needed.
+        if (session.Closed && session.Seeded)
+        {
+            await CloseAsync();
+            return;
+        }
+
+        try { nearby = shown = await Places.GetNearbyAsync(session.Lat, session.Lng, session.RadiusMeters); }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Loading places failed");
+            error = L["Couldn't load nearby places from the map provider. Try reloading in a minute."];
+        }
+        finally { loadingPlaces = false; }
+        await RefreshMap(fit: true);
+
+        // A new poll gets 3–5 dishes. Started before the list's own dish lookups; it uses the urgent lane anyway.
+        var picks = session.Seeded || nearby.Count == 0 ? Task.CompletedTask : Picker.EnsureSeededAsync(Code, session.Day, nearby);
+        picking = !picks.IsCompleted;
+        if (!session.Closed) await LoadDishesAsync();
+        StateHasChanged();
+        await picks;
+        picking = false;
+        session = await Sessions.GetAsync(Code, session.Day, me.Id) ?? session;
+        if (session.Closed) { await CloseAsync(); return; }
+        await RefreshMap();
+        if (session.ClosesAt is not null)
+            clock = new Timer(_ => InvokeAsync(OnClockTickAsync), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+    }
+
+    async Task NewName()
+    {
+        me!.Name = VoterNames.Random(CultureInfo.CurrentUICulture);
+        try { await Storage.SetAsync("voter", me); }
+        catch (Exception ex) { Log.LogDebug(ex, "Couldn't save the voter name in browser storage"); }
+    }
+
+    Task CreatePoll() => Act(async () =>
+    {
+        creating = true;
+        try
+        {
+            var created = await Sessions.CreatePollAsync(Code, me!.Name);
+            Go(created == session!.Today ? "today" : $"poll/{created:yyyy-MM-dd}");
+        }
+        finally { creating = false; }
+    });
+
+    // Full reload: each page sets up its own day (places, map, timers) when it starts.
+    void Go(string path) => Nav.NavigateTo(path, forceLoad: true);
+
+    /// <summary>Settles a tie / no-vote day once (saved, so everyone sees the same winner) and loads the result.</summary>
+    async Task CloseAsync()
+    {
+        closing = true;
+        StateHasChanged();
+        try { await Sessions.CloseDayAsync(Code, session!.Day); }
+        catch (Exception ex) { Log.LogWarning(ex, "Closing the poll failed"); }
+        session = await Sessions.GetAsync(Code, session!.Day, me?.Id) ?? session;
+        closing = false;
+    }
+
+    async Task OnClockTickAsync()
+    {
+        try
+        {
+            if (session is { Closed: false, ClosesAt: { } closesAt } && DateTimeOffset.UtcNow >= closesAt)
+            {
+                clock?.Dispose();
+                clock = null;
+                await CloseAsync();
+            }
+            StateHasChanged(); // countdown
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Deadline tick failed"); }
+    }
+
+    string TimeLeft(TimeSpan left) => left switch
+    {
+        { TotalMinutes: < 1 } => L["less than a minute left"],
+        { TotalHours: >= 1 } => L["{0} h {1} min left", (int)left.TotalHours, left.Minutes],
+        _ => L["{0} min left", (int)Math.Ceiling(left.TotalMinutes)],
+    };
+
+    string Votes(int n) => n == 1 ? L["1 vote"] : L["{0} votes", n];
+
+    string WinReason(CandidateView w) => w.PickedBy switch
+    {
+        CandidateSource.Dice when w.VoterNames.Count == 0 => L["Nobody voted, so the dice chose."],
+        CandidateSource.Dice => L["Tied at {0}, so the dice broke the tie.", Votes(w.VoterNames.Count)],
+        { } by => L["Picked at random by {0}.", by],
+        null => $"{Votes(w.VoterNames.Count)}: {string.Join(", ", w.VoterNames)}",
+    };
+
+    string RuleMessage(PollRuleException ex) => ex.Rule switch
+    {
+        PollRule.Closed => L["This poll closed at {0}.", Time(ex.Deadline)],
+        PollRule.NoPoll => L["There's no poll for that day yet. Create one first."],
+        PollRule.OutsideWindow => L["Only today's and tomorrow's polls can change."],
+        PollRule.OptionGone => L["That option isn't in this poll. Reload the page."],
+        PollRule.TooManyOptions => L["A poll can have at most {0} options.", ex.Limit],
+        _ => ex.Message,
+    };
+
+    // A plain Google Maps link: no API key, opens the app on phones.
+    static string DirectionsUrl(CandidateView w) =>
+        string.Create(CultureInfo.InvariantCulture, $"https://www.google.com/maps/dir/?api=1&destination={w.Lat},{w.Lng}");
+
+    async Task LoadDishesAsync()
+    {
+        try
+        {
+            foreach (var (id, top) in await Dishes.GetKnownAsync(shown.Select(p => p.Id).ToList())) dishes[id] = top;
+            foreach (var p in shown.Take(AutoDishLookups).Where(p => !dishes.ContainsKey(p.Id))) RequestDishes(p);
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Loading dishes failed"); }
+    }
+
+    void RequestDishes(PlaceInfo p) => Dishes.Request(new DishQuery(p.Id, p.Name, p.Category, p.Address));
+
+    void OnDishLookupFinished(string placeId) => _ = InvokeAsync(async () =>
+    {
+        if (!shown.Any(p => p.Id == placeId)) return;
+        try
+        {
+            if ((await Dishes.GetKnownAsync([placeId])).TryGetValue(placeId, out var top)) dishes[placeId] = top;
+            StateHasChanged();
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Refreshing dishes for {Place} failed", placeId); }
+    });
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (session is { IsOpen: true } && !mapStarted) // the map only exists while voting is open
+        {
+            mapStarted = true;
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/map.js");
+            map = await module.InvokeAsync<IJSObjectReference>("createMap", mapEl, session.Lat, session.Lng, session.RadiusMeters);
+            await RefreshMap(fit: true);
+        }
+    }
+
+    async Task RefreshMap(bool fit = false)
+    {
+        if (map is null || session is null) return;
+        var inPoll = session.Candidates.Select(c => c.PlaceId).ToHashSet(); // a place can be in the poll several times (one per dish)
+        var markers = shown.Where(p => !inPoll.Contains(p.Id)).Select(p => new { name = p.Name, lat = p.Lat, lng = p.Lng, kind = "place" })
+            .Concat(session.Candidates.Select(c => new { name = OptionTitle(c), lat = c.Lat, lng = c.Lng, kind = c.PickedBy is not null ? "picked" : "candidate" }));
+        try { await module!.InvokeVoidAsync("setPlaces", map, markers, fit); }
+        catch (JSDisconnectedException) { }
+    }
+
+    void OnSessionChanged(string code)
+    {
+        if (code != Code || session is null) return;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                var hadPoll = session.HasPoll;
+                session = await Sessions.GetAsync(Code, session.Day, me?.Id) ?? session;
+                // Someone else just created this day's poll: start over so the map, places and picks load.
+                if (!hadPoll && session.HasPoll) { Go(Nav.Uri); return; }
+                StateHasChanged();
+                await RefreshMap();
+            }
+            catch (Exception ex) { Log.LogWarning(ex, "Refreshing the poll failed"); }
+        });
+    }
+
+    Task ToggleIdea(string idea)
+    {
+        if (!selectedIdeas.Remove(idea)) selectedIdeas.Add(idea);
+        return RunSearch();
+    }
+
+    async Task RunSearch()
+    {
+        var terms = selectedIdeas.Concat(string.IsNullOrWhiteSpace(query) ? [] : [query.Trim()]).ToList();
+        if (terms.Count == 0) { await ClearSearch(); return; }
+        searching = true; error = null;
+        try
+        {
+            // One search per term, merged: a place shows if it's a top match for any selected tag.
+            // Interleaved by rank (each tag's best first), so one tag with higher raw scores can't bury the others.
+            var perTerm = terms.Count == 1 ? 15 : 8;
+            var byId = nearby.ToDictionary(p => p.Id);
+            var results = await Task.WhenAll(terms.Select(async t =>
+                // Over-fetch: the index may also hold places from another provider or outside the list.
+                (Term: t, Hits: (await Search.SearchAsync(t, session!.Lat, session.Lng, SearchRadius, top: 50))
+                    .Where(h => byId.ContainsKey(h.Id)).Take(perTerm).ToList())));
+            var merged = results
+                .SelectMany(r => r.Hits.Select((h, rank) => (r.Term, h.Id, h.Score, Rank: rank)))
+                .GroupBy(x => x.Id)
+                .Select(g => (Id: g.Key, Score: g.Max(x => x.Score), Rank: g.Min(x => x.Rank),
+                    Terms: g.OrderByDescending(x => x.Score).Select(x => x.Term).ToList()))
+                .OrderBy(x => x.Rank).ThenByDescending(x => x.Score)
+                .ToList();
+            shown = merged.Select(m => byId[m.Id]).ToList();
+            scores = merged.ToDictionary(m => m.Id, m => m.Score);
+            matchedBy = terms.Count > 1 ? merged.ToDictionary(m => m.Id, m => m.Terms) : null;
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Semantic search failed");
+            error = L["Semantic search is unavailable right now (is the embedding service running?)."];
+        }
+        finally { searching = false; }
+        await RefreshMap(fit: true);
+        await LoadDishesAsync();
+    }
+
+    async Task ClearSearch()
+    {
+        query = ""; scores = null; matchedBy = null; shown = nearby;
+        selectedIdeas.Clear();
+        await RefreshMap(fit: true);
+        await LoadDishesAsync();
+    }
+
+    Task AddCandidate(PlaceInfo p, string? dish = null) =>
+        Act(() => Sessions.AddCandidateAsync(Code, session!.Day, new NewCandidate(p.Id, p.Name, p.Cuisine, p.Lat, p.Lng, dish), me!.Name));
+
+    Task ToggleVote(CandidateView c) => Act(() => Sessions.ToggleVoteAsync(Code, session!.Day, c.Id, me!.Id, me.Name));
+
+    Task PickRandom() => Act(async () =>
+    {
+        // Empty poll: put a random dish (or place, if no dishes are known) from the current list in, then pick it ("surprise me").
+        if (session!.Candidates.Count == 0)
+        {
+            var options = shown.SelectMany(p => (dishes.GetValueOrDefault(p.Id) ?? []).Select(d => (Place: p, Dish: (string?)d))).ToList();
+            if (options.Count == 0) options = shown.Select(p => (Place: p, Dish: (string?)null)).ToList();
+            var (place, dish) = options[Random.Shared.Next(options.Count)];
+            await AddCandidate(place, dish);
+        }
+        await Sessions.PickRandomAsync(Code, session.Day, me!.Name);
+    });
+
+    async Task Act(Func<Task> action)
+    {
+        error = null;
+        try { await action(); }
+        catch (PollRuleException ex) { error = RuleMessage(ex); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // Validation failures only happen with a stale or tampered page; the details stay in the log.
+            Log.LogInformation(ex, "Rejected action in group {Code}", Code);
+            error = L["That didn't work. Reload the page and try again."];
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Action failed in group {Code}", Code);
+            error = L["Something went wrong. Please try again."];
+        }
+    }
+
+    async Task CopyLink()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", Nav.Uri); copied = true; }
+        catch (JSException) { error = L["Couldn't copy. Select the link and copy it manually."]; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Sessions.Changed -= OnSessionChanged;
+        Dishes.LookupFinished -= OnDishLookupFinished;
+        clock?.Dispose();
+        try
+        {
+            if (map is not null) await map.DisposeAsync();
+            if (module is not null) await module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+    }
+}

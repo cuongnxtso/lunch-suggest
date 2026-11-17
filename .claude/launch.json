@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "web", "runtimeExecutable": "dotnet", "runtimeArgs": ["run", "--project", "src/LunchSuggest.Web", "--launch-profile", "http"], "port": 5063 },
+    { "name": "web-verify", "runtimeExecutable": "dotnet", "runtimeArgs": ["run", "--project", "src/LunchSuggest.Web", "--no-launch-profile", "--property:BaseOutputPath=../../.verify-bin/", "-e", "ASPNETCORE_ENVIRONMENT=Development", "--urls", "http://localhost:5065"], "port": 5065, "autoPort": false }
+  ]
+}

@@ -1,0 +1,36 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager Nav
+
+<nav class="navbar navbar-dark bg-dark mb-3">
+    <div class="container">
+        <a class="navbar-brand" href="">🍜 LunchSuggest</a>
+        <div class="btn-group btn-group-sm" role="group" aria-label="@L["Language"]">
+            <button class="btn @(IsCurrent("vi") ? "btn-light" : "btn-outline-light")" aria-pressed="@(IsCurrent("vi") ? "true" : "false")"
+                    lang="vi" @onclick='() => Switch("vi")'>Tiếng Việt</button>
+            <button class="btn @(IsCurrent("en") ? "btn-light" : "btn-outline-light")" aria-pressed="@(IsCurrent("en") ? "true" : "false")"
+                    lang="en" @onclick='() => Switch("en")'>English</button>
+        </div>
+    </div>
+</nav>
+
+<main class="container pb-5">
+    @Body
+</main>
+
+<div id="blazor-error-ui" data-nosnippet>
+    @L["An unhandled error has occurred."]
+    <a href="." class="reload">@L["Reload"]</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    static bool IsCurrent(string culture) => System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == culture;
+
+    // The cookie is set by a normal request; the reload starts the page again in the new language.
+    void Switch(string culture)
+    {
+        if (IsCurrent(culture)) return;
+        var back = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+        Nav.NavigateTo($"culture/{culture}?redirect={Uri.EscapeDataString(back)}", forceLoad: true);
+    }
+}
