@@ -1,11 +1,12 @@
 @page "/"
-@inject GroupSettings Group
+@inject GroupSettings Defaults
+@inject ILunchSessions Sessions
 
-<PageTitle>LunchSuggest</PageTitle>
+<PageTitle>@siteTitle</PageTitle>
 
 <div class="landing">
     <a href="today" class="choose-meal">
-        <span class="choose-meal-icon" aria-hidden="true">@Icon</span>
+        <span class="choose-meal-icon" aria-hidden="true">@icon</span>
         <span class="choose-meal-label">@L["Choose meal"]</span>
     </a>
 </div>
@@ -14,12 +15,18 @@
     // Phở leads the set; one icon per day, the same for everyone that day.
     static readonly string[] Icons = ["🍜", "🍲", "🍛", "🍚", "🍱", "🥟", "🍤", "🍗", "🥗", "🥖", "🍝", "🍣", "🥘", "🍢", "🌮", "🥙", "🍕", "🍔"];
 
-    string Icon => Icons[new Random(Today().DayNumber).Next(Icons.Length)];
+    string icon = Icons[0];
+    string siteTitle = Layout.MainLayout.DefaultSiteTitle;
 
-    // The group's day, so the icon changes at the team's midnight.
-    DateOnly Today()
+    protected override async Task OnInitializedAsync()
     {
-        var tz = Group.TimeZone is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z) ? z : TimeZoneInfo.Local;
-        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz));
+        var group = await Sessions.GetGroupAsync(Defaults.Code);
+        siteTitle = group?.SiteTitle ?? siteTitle;
+        // A fixed icon from the Settings page, else the daily one: the group's day, so it changes at the team's midnight.
+        if (group?.LandingIcon is { } fixedIcon) { icon = fixedIcon; return; }
+        var timeZone = group?.TimeZone ?? Defaults.TimeZone;
+        var tz = timeZone is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z) ? z : TimeZoneInfo.Local;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz));
+        icon = Icons[new Random(today.DayNumber).Next(Icons.Length)];
     }
 }

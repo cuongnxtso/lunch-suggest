@@ -2,6 +2,7 @@
 @page "/poll/{DayText}"
 @implements IAsyncDisposable
 @using System.Globalization
+@using Microsoft.AspNetCore.Components.Authorization
 @inject GroupSettings Group
 @inject ILunchSessions Sessions
 @inject IPlaceDirectory Places
@@ -12,6 +13,7 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject ILogger<Session> Log
+@inject IConfiguration Config
 
 <PageTitle>@(session?.Title ?? L["Lunch poll"])</PageTitle>
 
@@ -28,16 +30,24 @@ else
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <div class="me-auto">
             <h1 class="h3 mb-0">@session.Title <small class="text-muted fs-6">· @LongDate(session.Day)</small></h1>
-            @if (Group.Address is { Length: > 0 }) { <div class="small text-muted">📍 @Group.Address</div> }
+            @if (session.Address is { Length: > 0 }) { <div class="small text-muted">📍 @session.Address</div> }
             @if (session.Day != session.Today)
             {
-                <button class="btn btn-link btn-sm p-0" @onclick='() => Go("today")'>@L["← Back to today"]</button>
+                <button class="btn btn-link btn-sm p-0 me-3" @onclick='() => Go("today")'>@L["← Back to today"]</button>
             }
+            @* target="_top": a full page load, since the history page is static (not part of the live connection) *@
+            <a class="btn btn-link btn-sm p-0" href="history" target="_top">📜 @L["Poll history"]</a>
         </div>
-        <input class="form-control form-control-sm" style="max-width: 22rem" readonly value="@Nav.Uri" aria-label="@L["Invite link"]" />
+        <input class="form-control form-control-sm" style="max-width: 22rem" readonly value="@InviteLink" aria-label="@L["Invite link"]" />
         <button class="btn btn-sm btn-outline-primary" @onclick="CopyLink">@(copied ? L["Copied!"] : L["Copy invite link"])</button>
     </div>
 
+    @if (notice is not null)
+    {
+        <div class="alert alert-success alert-dismissible" role="status">
+            @notice <button type="button" class="btn-close" aria-label="@L["Close"]" @onclick="() => notice = null"></button>
+        </div>
+    }
     @if (error is not null)
     {
         <div class="alert alert-warning alert-dismissible" role="alert">
@@ -45,20 +55,58 @@ else
         </div>
     }
 
-    @if ((session.IsOpen || !session.NextPollExists) && me is { Name.Length: > 0 })
+    @if ((session.IsOpen || !session.NextPollExists) && signInOn && me is null)
+    {
+        <div class="alert alert-info py-2 small">
+            👀 @L["You can look, but only signed-in colleagues can vote or add options."]
+            <a class="fw-semibold" href="@SignInUrl" target="_top">@L["Sign in with Google"]</a>
+        </div>
+    }
+    else if ((session.IsOpen || !session.NextPollExists) && signInOn && me is { Approved: false })
+    {
+        <div class="alert alert-warning py-2 small" aria-live="polite">
+            ⏳ @L["Signed in as {0}. The organiser still has to let you vote; this page unlocks as soon as they do.", me.Name]
+            <a class="ms-1" href="signout?returnUrl=@Uri.EscapeDataString(HerePath)" target="_top">@L["Sign out"]</a>
+        </div>
+    }
+    else if ((session.IsOpen || !session.NextPollExists) && me is { Name.Length: > 0 })
     {
         <p class="small text-muted">
             @L["You're"] <strong>@me.Name</strong> ·
-            <button class="btn btn-link btn-sm p-0 align-baseline" @onclick="NewName">@L["🎲 New name"]</button>
+            @if (signInOn)
+            {
+                <a class="small" href="signout?returnUrl=@Uri.EscapeDataString(HerePath)" target="_top">@L["Sign out"]</a>
+            }
+            else if (me.Locked)
+            {
+                <span>@L["Your name is fixed after your first vote."]</span>
+            }
+            else
+            {
+                <button class="btn btn-link btn-sm p-0 align-baseline" @onclick="NewName">@L["🎲 New name"]</button>
+            }
         </p>
     }
 
     @if (!session.HasPoll)
     {
         <section class="text-center py-4">
-            <div class="display-1" aria-hidden="true">🗳️</div>
-            <p class="lead mb-1">@L["No poll for {0} yet.", DayLabel(session.Day)]</p>
-            @if (session.Closed)
+            @if (session.Holiday)
+            {
+                <div class="display-1" aria-hidden="true">🎉</div>
+                <p class="lead mb-1">@L["Public holiday: no lunch poll."]</p>
+            }
+            else if (!PollDays.IsPollDay(session.Day))
+            {
+                <div class="display-1" aria-hidden="true">🏖️</div>
+                <p class="lead mb-1">@L["No lunch poll on weekends."]</p>
+            }
+            else
+            {
+                <div class="display-1" aria-hidden="true">🗳️</div>
+                <p class="lead mb-1">@L["No poll for {0} yet.", DayLabel(session.Day)]</p>
+            }
+            @if (session.Closed && PollDays.IsPollDay(session.Day) && !session.Holiday)
             {
                 <p class="text-muted">@L["Voting for {0} would have closed at {1}.", DayLabel(session.Day), Time(session.Deadline)]</p>
             }
@@ -109,9 +157,9 @@ else
     {
         var left = closesAt - DateTimeOffset.UtcNow;
         <div class="alert @(left < TimeSpan.FromMinutes(15) ? "alert-warning" : "alert-info") py-2" role="status">
-            @(session.Day == session.Today
-                ? L["⏰ Voting closes at {0} · {1}", Time(session.Deadline), TimeLeft(left)]
-                : L["⏰ Voting closes tomorrow at {0} · {1}", Time(session.Deadline), TimeLeft(left)])
+            @(session.Day == session.Today ? L["⏰ Voting closes at {0} · {1}", Time(session.Deadline), TimeLeft(left)]
+                : session.Day == session.Today.AddDays(1) ? L["⏰ Voting closes tomorrow at {0} · {1}", Time(session.Deadline), TimeLeft(left)]
+                : L["⏰ Voting closes {0} at {1} · {2}", LongDate(session.Day), Time(session.Deadline), TimeLeft(left)])
         </div>
     }
 
@@ -142,7 +190,40 @@ else
                 {
                     <button class="btn btn-sm btn-link" @onclick="ClearSearch">@L["show all nearby"]</button>
                 }
+                <button class="btn btn-sm btn-outline-secondary ms-auto" disabled="@(!CanAct)" aria-expanded="@suggestingPlace" @onclick="ToggleSuggestPlace">
+                    @(suggestingPlace ? L["Cancel"] : L["➕ Suggest a place"])
+                </button>
             </div>
+            @if (suggestingPlace)
+            {
+                <form class="card card-body mb-3" @onsubmit="SubmitPlace">
+                    <p class="small text-muted mb-2">@L["Missing a place? Click the map where it is, fill in its name and send it. Everyone sees it once the organiser approves it."]</p>
+                    <div class="row g-2">
+                        <div class="col-sm-6">
+                            <label class="form-label small mb-0" for="np-name">@L["Place name"]</label>
+                            <input id="np-name" class="form-control form-control-sm" @bind="newPlace.Name" @bind:event="oninput" maxlength="120" required />
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small mb-0" for="np-cuisine">@L["Cuisine (optional)"]</label>
+                            <input id="np-cuisine" class="form-control form-control-sm" @bind="newPlace.Cuisine" maxlength="60" placeholder="@L["e.g. phở, cơm văn phòng"]" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-0" for="np-address">@L["Address (optional)"]</label>
+                            <input id="np-address" class="form-control form-control-sm" @bind="newPlace.Address" maxlength="200" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-0" for="np-dishes">@L["Good dishes there (optional, separate with commas)"]</label>
+                            <input id="np-dishes" class="form-control form-control-sm" @bind="newPlace.Dishes" maxlength="600" placeholder="@L["e.g. Phở bò, Bún chả"]" />
+                        </div>
+                    </div>
+                    <div class="small mt-2 @(newPlace.Lat is null ? "text-danger" : "text-success")" aria-live="polite">
+                        @(newPlace.Lat is null ? L["📍 Click the map to set where it is."] : L["📍 Location set. Click the map again to move it."])
+                    </div>
+                    <div class="mt-2">
+                        <button type="submit" class="btn btn-sm btn-primary" disabled="@(newPlace.Lat is null || string.IsNullOrWhiteSpace(newPlace.Name))">@L["Send for approval"]</button>
+                    </div>
+                </form>
+            }
 
             @if (loadingPlaces)
             {
@@ -161,12 +242,14 @@ else
                 <ul class="list-group place-list">
                     @foreach (var p in shown)
                     {
-                        <li class="list-group-item">
+                        <li class="list-group-item @(selectedPlace == p.Id ? "place-selected" : "")">
                           <div class="d-flex align-items-center gap-2">
                             <div class="me-auto">
-                                <div class="fw-semibold">@p.Name</div>
+                                <button type="button" class="btn btn-link p-0 fw-semibold text-start text-reset text-decoration-none"
+                                        title="@L["Show on map"]" aria-pressed="@(selectedPlace == p.Id)" @onclick="() => SelectPlace(p)">📍 @p.Name</button>
                                 <div class="small text-muted">
                                     @p.Category@(p.Cuisine is null ? "" : $" · {p.Cuisine}") · @($"{p.DistanceMeters:F0} m")
+                                    @if (p.Id.StartsWith(PlacesModule.SuggestedIdPrefix)) { <span class="badge text-bg-light border ms-1">👥 @L["suggested"]</span> }
                                     @if (scores?.GetValueOrDefault(p.Id) is double s) { <span> · @L["match {0}", s.ToString("P0")]</span> }
                                     @if (matchedBy?.GetValueOrDefault(p.Id) is { } terms)
                                     {
@@ -180,7 +263,8 @@ else
                             }
                             else
                             {
-                                <button class="btn btn-sm btn-outline-primary" disabled="@(!CanAct)" @onclick="() => AddCandidate(p)">@L["Add place"]</button>
+                                <button class="btn btn-sm btn-outline-primary" disabled="@(!CanAct || session.IsFull)" title="@FullHint"
+                                        @onclick="() => AddCandidate(p)">@L["Add place"]</button>
                             }
                           </div>
                           @if (dishes.GetValueOrDefault(p.Id) is { } top)
@@ -200,7 +284,7 @@ else
                                           }
                                           else
                                           {
-                                              <button class="btn btn-sm btn-outline-success py-0" disabled="@(!CanAct)" title="@L["Add this dish to the poll"]"
+                                              <button class="btn btn-sm btn-outline-success py-0" disabled="@(!CanAct || session.IsFull)" title="@(FullHint ?? L["Add this dish to the poll"])"
                                                       @onclick="() => AddCandidate(p, dish)">+ @dish</button>
                                           }
                                       }
@@ -216,6 +300,37 @@ else
                           else
                           {
                               <button class="btn btn-link btn-sm p-0 mt-1" @onclick="() => RequestDishes(p)">@L["🍜 Find top dishes"]</button>
+                          }
+                          @if (dishFormFor == p.Id)
+                          {
+                              <form class="input-group input-group-sm mt-1" @onsubmit="() => SubmitDish(p)">
+                                  <input class="form-control" @bind="newDish" @bind:event="oninput" maxlength="120"
+                                         placeholder="@L["A dish they make well, e.g. Bún chả"]" aria-label="@L["Dish name"]" />
+                                  <button class="btn btn-outline-primary" type="submit" disabled="@string.IsNullOrWhiteSpace(newDish)">@L["Send for approval"]</button>
+                                  <button class="btn btn-outline-secondary" type="button" aria-label="@L["Close"]" @onclick="() => dishFormFor = null">✕</button>
+                              </form>
+                          }
+                          else if (removeFor == p.Id)
+                          {
+                              <form class="input-group input-group-sm mt-1" @onsubmit="() => SubmitRemoval(p)">
+                                  <span class="input-group-text">🚫</span>
+                                  <select class="form-select" @bind="removeWhat" aria-label="@L["What should be removed?"]">
+                                      <option value="">@L["The whole place (closed, wrong, not food)"]</option>
+                                      @foreach (var d in dishes.GetValueOrDefault(p.Id) ?? [])
+                                      {
+                                          <option value="@d">🍜 @d</option>
+                                      }
+                                  </select>
+                                  <button class="btn btn-outline-danger" type="submit">@L["Send for approval"]</button>
+                                  <button class="btn btn-outline-secondary" type="button" aria-label="@L["Close"]" @onclick="() => removeFor = null">✕</button>
+                              </form>
+                          }
+                          else if (CanAct)
+                          {
+                              <div class="d-flex gap-3">
+                                  <button class="btn btn-link btn-sm p-0 mt-1 text-secondary" @onclick="() => OpenDishForm(p)">@L["＋ Suggest a dish"]</button>
+                                  <button class="btn btn-link btn-sm p-0 mt-1 text-secondary" @onclick="() => OpenRemoveForm(p)">@L["🚫 Suggest a removal"]</button>
+                              </div>
                           }
                         </li>
                     }
@@ -271,6 +386,15 @@ else
                         </li>
                     }
                 </ul>
+                @if (session.Candidates.Count > 0)
+                {
+                    // One vote per person per poll, so the names across options are the voters.
+                    var voters = session.Candidates.SelectMany(c => c.VoterNames).Distinct().Order().ToList();
+                    <div class="card-body border-top small" aria-live="polite">
+                        @if (voters.Count == 0) { <span class="text-muted">@L["Nobody has voted yet."]</span> }
+                        else { <span>🙋 <strong>@L["Voters ({0}):", voters.Count]</strong> @string.Join(", ", voters)</span> }
+                    </div>
+                }
                 @if (session.CreatedBy is { } by && by != "app") @* "app" = polls from before the Create button existed *@
                 {
                     <div class="card-footer small text-muted">@L["Poll created by {0}", by]</div>
@@ -286,10 +410,15 @@ else
 
     string Code => Group.Code;
 
-    // English text doubles as the translation key (shown via L) and as the search query, which the English embedding model reads best.
-    static readonly string[] Ideas = ["Noodle soup", "Rice & grilled meat", "Something light & healthy", "Vegetarian", "Burger or pizza", "Coffee and a sandwich"];
+    // The link to share: the configured address (e.g. http://10.3.0.54:8686) + this page's path, not "localhost" from this browser.
+    string InviteLink => session?.ShareUrl is { } shareUrl ? $"{shareUrl}/{Nav.ToBaseRelativePath(Nav.Uri)}" : Nav.Uri;
 
-    sealed class Voter { public string Id { get; set; } = ""; public string Name { get; set; } = ""; }
+    // English text doubles as the translation key (shown via L) and as the search query, which the English embedding model reads best.
+    static readonly string[] Ideas = ["Noodle soup", "Rice & grilled meat", "Something light & healthy", "Vegetarian", "Burger or pizza", "Bánh mì or a sandwich"];
+
+    // Locked: set by the first vote; the name can't be re-rolled after that.
+    // Approved: only used with sign-in on (not stored in the browser).
+    sealed class Voter { public string Id { get; set; } = ""; public string Name { get; set; } = ""; public bool Locked { get; set; } public bool Approved { get; set; } }
 
     SessionView? session;
     DateOnly? day; // null = today
@@ -305,12 +434,35 @@ else
     const int AutoDishLookups = 8;
     string query = "";
     string? error;
+    string? selectedPlace; // place picked in the list, highlighted on the map
+    string? notice; // "thanks, waiting for approval"
+    bool suggestingPlace; // the "Suggest a place" form is open (the map picks its location)
+    NewPlaceForm newPlace = new();
+    string? dishFormFor; // place id whose "Suggest a dish" box is open
+    string newDish = "";
+    string? removeFor; // place id whose "Suggest a removal" box is open
+    string removeWhat = ""; // "" = the place itself, else one of its dishes
+    DotNetObjectReference<Session>? self; // lets the map report clicks back
+
+    sealed class NewPlaceForm
+    {
+        public string Name { get; set; } = "";
+        public string? Cuisine { get; set; }
+        public string? Address { get; set; }
+        public string? Dishes { get; set; }
+        public double? Lat { get; set; }
+        public double? Lng { get; set; }
+    }
     Voter? me;
     ElementReference mapEl;
     IJSObjectReference? module, map;
     bool mapStarted;
 
-    bool CanAct => me is { Name.Length: > 0 };
+    bool CanAct => me is { Name.Length: > 0 } && (!signInOn || me.Approved);
+    [CascadingParameter] Task<AuthenticationState>? Auth { get; set; } // only there when sign-in is on
+    bool signInOn;
+    string HerePath => "/" + Nav.ToBaseRelativePath(Nav.Uri);
+    string SignInUrl => $"signin?returnUrl={Uri.EscapeDataString(HerePath)}";
     // The Places module may widen the radius in sparse areas; search must cover the same ground.
     int SearchRadius => Math.Max(session?.RadiusMeters ?? 0, (int)Math.Ceiling(nearby.Count == 0 ? 0 : nearby.Max(p => p.DistanceMeters)));
     CandidateView? Picked => session?.Picked;
@@ -326,10 +478,17 @@ else
 
     string OptionTitle(CandidateView c) => c.Dish is null ? c.Name : $"{c.Dish} {L["at"]} {c.Name}";
 
-    string PollHeading() =>
-        session!.Day == session.Today ? L["Today's poll ({0})", session.Candidates.Count]
-        : session.Day == session.Today.AddDays(1) ? L["Tomorrow's poll ({0})", session.Candidates.Count]
-        : L["Poll for {0} ({1})", ShortDate(session.Day), session.Candidates.Count];
+    // "(6/8)": how many options there are, out of the most a poll can have.
+    string PollHeading()
+    {
+        var count = $"{session!.Candidates.Count}/{session.MaxOptions}";
+        return session.Day == session.Today ? L["Today's poll ({0})", count]
+            : session.Day == session.Today.AddDays(1) ? L["Tomorrow's poll ({0})", count]
+            : L["Poll for {0} ({1})", ShortDate(session.Day), count];
+    }
+
+    // Tooltip on the disabled add buttons; null while there's room.
+    string? FullHint => session!.IsFull ? L["The poll is full ({0} options max).", session.MaxOptions].Value : null;
 
     /// <summary>"Create new poll" (one poll a day), or a way to the next poll if it already exists.</summary>
     RenderFragment NextPollPanel => __builder =>
@@ -343,9 +502,9 @@ else
                     @L["➕ Create new poll"]
                 </button>
                 <p class="small text-muted mt-2 mb-0">
-                    @(next == session.Today
-                        ? L["For today, voting until {0}. One poll a day.", Time(session.Deadline)]
-                        : L["For tomorrow, {0}, voting until {1}. One poll a day.", LongDate(next), Time(session.Deadline)])
+                    @(next == session.Today ? L["For today, voting until {0}. One poll a day.", Time(session.Deadline)]
+                        : next == session.Today.AddDays(1) ? L["For tomorrow, {0}, voting until {1}. One poll a day.", LongDate(next), Time(session.Deadline)]
+                        : L["For {0}, voting until {1}. One poll a day (Monday to Friday, except holidays).", LongDate(next), Time(session.Deadline)])
                 </p>
             </div>
         }
@@ -353,11 +512,24 @@ else
         {
             <div class="text-center my-4">
                 <button class="btn btn-outline-success btn-lg rounded-pill px-4" @onclick='() => Go($"poll/{next:yyyy-MM-dd}")'>
-                    @(next == session.Today ? L["🗳️ Open today's poll →"] : L["🗳️ Open tomorrow's poll →"])
+                    @(next == session.Today ? L["🗳️ Open today's poll →"]
+                        : next == session.Today.AddDays(1) ? L["🗳️ Open tomorrow's poll →"]
+                        : L["🗳️ Open the poll for {0} →", LongDate(next)])
                 </button>
             </div>
         }
     };
+
+    // This viewer's language. Events (others' votes, dish lookups, the clock) arrive on threads carrying someone else's
+    // culture or none, and InvokeAsync keeps the caller's, so put this one back before rendering.
+    readonly CultureInfo culture = CultureInfo.CurrentCulture, uiCulture = CultureInfo.CurrentUICulture;
+
+    Task OnCircuit(Func<Task> work) => InvokeAsync(() =>
+    {
+        CultureInfo.CurrentCulture = culture;
+        CultureInfo.CurrentUICulture = uiCulture;
+        return work();
+    });
 
     protected override async Task OnInitializedAsync()
     {
@@ -371,17 +543,30 @@ else
             day = parsed;
         }
 
-        // Browser-side identity: a random id + a random fun name ("Chuột Lang Nước Thư Thái"). Not auth; anyone with the link can vote.
-        // (JS storage works here because the page isn't prerendered.)
-        try { me = (await Storage.GetAsync<Voter>("voter")).Value; }
-        catch (System.Security.Cryptography.CryptographicException) { } // data-protection keys changed
-        me ??= new Voter { Id = Guid.NewGuid().ToString("N") };
-        if (me.Name.Length == 0) await NewName();
+        signInOn = GoogleSignIn.IsOn(Config);
+        if (signInOn)
+        {
+            // Google account = voter, display name = voter name. Not signed in: me stays null and the page is view-only.
+            if (Auth is not null && GoogleSignIn.Voter((await Auth).User) is { } account && !await ClaimAccountNameAsync(account))
+                error = L["Couldn't save your name. Reload the page to try again."];
+        }
+        else
+        {
+            // Browser-side identity: a random id + a random fun name ("Chuột Lang Nước Thư Thái"). Not auth; anyone with the link can vote.
+            // (JS storage works here because the page isn't prerendered.)
+            try { me = (await Storage.GetAsync<Voter>("voter")).Value; }
+            catch (System.Security.Cryptography.CryptographicException) { } // data-protection keys changed
+            me ??= new Voter { Id = Guid.NewGuid().ToString("N") };
+            // Claims the name on the server (re-rolled if someone else has it); a voter who has voted gets their fixed name back.
+            if (!await SaveNameAsync(me.Name.Length > 0 ? me.Name : VoterNames.Random(CultureInfo.CurrentUICulture)))
+                error = L["Couldn't save your name. Reload the page to try again."];
+        }
 
-        session = await Sessions.GetAsync(Code, day, me.Id);
+        session = await Sessions.GetAsync(Code, day, me?.Id);
         if (session is null) { notFound = L["The lunch group isn't set up. Check the \"Lunch\" section in the app settings."]; return; }
         Sessions.Changed += OnSessionChanged;
         Dishes.LookupFinished += OnDishLookupFinished;
+        Places.SuggestionsChanged += OnPlacesChanged;
         if (!session.HasPoll) return; // nothing to load until someone creates the poll
         picking = !session.Seeded;
         StateHasChanged();
@@ -409,18 +594,62 @@ else
         StateHasChanged();
         await picks;
         picking = false;
-        session = await Sessions.GetAsync(Code, session.Day, me.Id) ?? session;
+        session = await Sessions.GetAsync(Code, session.Day, me?.Id) ?? session;
         if (session.Closed) { await CloseAsync(); return; }
         await RefreshMap();
         if (session.ClosesAt is not null)
-            clock = new Timer(_ => InvokeAsync(OnClockTickAsync), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+            clock = new Timer(_ => OnCircuit(OnClockTickAsync), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
     }
 
     async Task NewName()
     {
-        me!.Name = VoterNames.Random(CultureInfo.CurrentUICulture);
-        try { await Storage.SetAsync("voter", me); }
-        catch (Exception ex) { Log.LogDebug(ex, "Couldn't save the voter name in browser storage"); }
+        if (!await SaveNameAsync(VoterNames.Random(CultureInfo.CurrentUICulture)))
+            error = L["Couldn't save a new name. Try again."];
+    }
+
+    /// <summary>
+    /// Saves <paramref name="name"/> on the server (unique; fixed after the first vote), then in the browser.
+    /// A name another voter has is re-rolled. False if nothing was saved on the server; the current name stays.
+    /// </summary>
+    async Task<bool> SaveNameAsync(string name)
+    {
+        try
+        {
+            for (var tries = 0; tries < 5; tries++, name = VoterNames.Random(CultureInfo.CurrentUICulture))
+            {
+                if (await Sessions.SaveVoterNameAsync(me!.Id, name) is not { } saved) continue; // taken
+                (me.Name, me.Locked) = (saved.Name, saved.Locked);
+                // Votes use the server's copy, so a failed browser save only means the name is re-sent on the next visit.
+                try { await Storage.SetAsync("voter", me); }
+                catch (Exception ex) { Log.LogWarning(ex, "Couldn't save the voter in browser storage"); }
+                return true;
+            }
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Saving the voter name failed"); }
+        return false;
+    }
+
+    /// <summary>
+    /// Signed-in voter: their display name, or "Name 2", "Name 3"… if another voter has it (never the e-mail: polls are public).
+    /// Locked, since the name comes from the account (no "New name" button).
+    /// </summary>
+    async Task<bool> ClaimAccountNameAsync((string Id, string Name, string Email) account)
+    {
+        try
+        {
+            var name = account.Name[..Math.Min(account.Name.Length, 37)];
+            // On the regulars list, while that's switched on (Settings page).
+            var listed = GoogleSignIn.IsListed(account.Name, GoogleSignIn.AutoApproveNames(Config))
+                && (await Sessions.GetGroupAsync(Code))?.AutoApprove == true;
+            foreach (var tryName in Enumerable.Range(1, 5).Select(n => n == 1 ? name : $"{name} {n}"))
+                if (await Sessions.SaveAccountVoterAsync(account.Id, tryName, account.Email, approveIfNew: listed) is { } saved)
+                {
+                    me = new Voter { Id = account.Id, Name = saved.Name, Locked = true, Approved = saved.Approved };
+                    return true;
+                }
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Saving the signed-in voter's name failed"); }
+        return false;
     }
 
     Task CreatePoll() => Act(async () =>
@@ -484,7 +713,7 @@ else
     {
         PollRule.Closed => L["This poll closed at {0}.", Time(ex.Deadline)],
         PollRule.NoPoll => L["There's no poll for that day yet. Create one first."],
-        PollRule.OutsideWindow => L["Only today's and tomorrow's polls can change."],
+        PollRule.OutsideWindow => L["Only today's poll and the next weekday's can change."],
         PollRule.OptionGone => L["That option isn't in this poll. Reload the page."],
         PollRule.TooManyOptions => L["A poll can have at most {0} options.", ex.Limit],
         _ => ex.Message,
@@ -506,7 +735,7 @@ else
 
     void RequestDishes(PlaceInfo p) => Dishes.Request(new DishQuery(p.Id, p.Name, p.Category, p.Address));
 
-    void OnDishLookupFinished(string placeId) => _ = InvokeAsync(async () =>
+    void OnDishLookupFinished(string placeId) => _ = OnCircuit(async () =>
     {
         if (!shown.Any(p => p.Id == placeId)) return;
         try
@@ -533,22 +762,42 @@ else
         if (map is null || session is null) return;
         var inPoll = session.Candidates.Select(c => c.PlaceId).ToHashSet(); // a place can be in the poll several times (one per dish)
         var markers = shown.Where(p => !inPoll.Contains(p.Id)).Select(p => new { name = p.Name, lat = p.Lat, lng = p.Lng, kind = "place" })
-            .Concat(session.Candidates.Select(c => new { name = OptionTitle(c), lat = c.Lat, lng = c.Lng, kind = c.PickedBy is not null ? "picked" : "candidate" }));
+            .Concat(session.Candidates.Select(c => new { name = OptionTitle(c), lat = c.Lat, lng = c.Lng,
+                kind = c.PickedBy is not null ? "picked" : c.VotedByMe ? "voted" : "candidate" }))
+            // Last, so it's drawn on top of a poll marker at the same spot.
+            .Concat(shown.Where(p => p.Id == selectedPlace).Select(p => new { name = p.Name, lat = p.Lat, lng = p.Lng, kind = "selected" }));
         try { await module!.InvokeVoidAsync("setPlaces", map, markers, fit); }
         catch (JSDisconnectedException) { }
     }
 
+    // A suggested place was approved (or removed) on the Settings page: reload the list, so it shows up without a reload.
+    void OnPlacesChanged() => _ = OnCircuit(async () =>
+    {
+        if (session is not { IsOpen: true } || loadingPlaces) return;
+        try
+        {
+            nearby = await Places.GetNearbyAsync(session.Lat, session.Lng, session.RadiusMeters);
+            if (scores is null) shown = nearby; // while a search is shown, the new place appears once it's cleared
+            await LoadDishesAsync();
+            StateHasChanged();
+            await RefreshMap();
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Refreshing the places failed"); }
+    });
+
     void OnSessionChanged(string code)
     {
         if (code != Code || session is null) return;
-        _ = InvokeAsync(async () =>
+        _ = OnCircuit(async () =>
         {
             try
             {
                 var hadPoll = session.HasPoll;
                 session = await Sessions.GetAsync(Code, session.Day, me?.Id) ?? session;
-                // Someone else just created this day's poll: start over so the map, places and picks load.
-                if (!hadPoll && session.HasPoll) { Go(Nav.Uri); return; }
+                if (signInOn && me is not null) me.Approved = await Sessions.IsVoterApprovedAsync(me.Id); // approved on Settings just now?
+                // This day's poll was just created (or reset on the Settings page): start over, so the map, places and
+                // picks load for the new poll, or the page shows "no poll yet" without a stale map and timers.
+                if (hadPoll != session.HasPoll) { Go(Nav.Uri); return; }
                 StateHasChanged();
                 await RefreshMap();
             }
@@ -606,10 +855,20 @@ else
         await LoadDishesAsync();
     }
 
+    async Task SelectPlace(PlaceInfo p)
+    {
+        selectedPlace = selectedPlace == p.Id ? null : p.Id; // click again to clear
+        await RefreshMap();
+    }
+
     Task AddCandidate(PlaceInfo p, string? dish = null) =>
         Act(() => Sessions.AddCandidateAsync(Code, session!.Day, new NewCandidate(p.Id, p.Name, p.Cuisine, p.Lat, p.Lng, dish), me!.Name));
 
-    Task ToggleVote(CandidateView c) => Act(() => Sessions.ToggleVoteAsync(Code, session!.Day, c.Id, me!.Id, me.Name));
+    Task ToggleVote(CandidateView c) => Act(async () =>
+    {
+        await Sessions.ToggleVoteAsync(Code, session!.Day, c.Id, me!.Id);
+        if (!me.Locked) await SaveNameAsync(me.Name); // the first vote fixed the name; pick up the server's copy
+    });
 
     Task PickRandom() => Act(async () =>
     {
@@ -621,12 +880,96 @@ else
             var (place, dish) = options[Random.Shared.Next(options.Count)];
             await AddCandidate(place, dish);
         }
-        await Sessions.PickRandomAsync(Code, session.Day, me!.Name);
+        // The picker's vote goes to the pick (moving any earlier vote); skip if it's already theirs, since voting again would undo it.
+        if (await Sessions.PickRandomAsync(Code, session.Day, me!.Name) is Guid id
+            && (await Sessions.GetAsync(Code, session.Day, me.Id))?.Candidates.FirstOrDefault(c => c.Id == id) is { VotedByMe: false })
+        {
+            await Sessions.ToggleVoteAsync(Code, session.Day, id, me.Id);
+            if (!me.Locked) await SaveNameAsync(me.Name);
+        }
     });
+
+    async Task ToggleSuggestPlace()
+    {
+        suggestingPlace = !suggestingPlace;
+        if (suggestingPlace) { newPlace = new(); self ??= DotNetObjectReference.Create(this); }
+        if (map is null) return;
+        try { await module!.InvokeVoidAsync(suggestingPlace ? "startPick" : "stopPick", map, self); }
+        catch (JSDisconnectedException) { }
+    }
+
+    /// <summary>Called by map.js when someone clicks the map while suggesting a place.</summary>
+    [JSInvokable]
+    public Task OnMapPicked(double lat, double lng) => OnCircuit(() =>
+    {
+        (newPlace.Lat, newPlace.Lng) = (lat, lng);
+        StateHasChanged();
+        return Task.CompletedTask;
+    });
+
+    Task SubmitPlace() => Act(async () =>
+    {
+        if (newPlace is not { Lat: { } lat, Lng: { } lng }) return;
+        // It has to be within reach, or it would never show up in the list.
+        if (DistanceMeters(session!.Lat, session.Lng, lat, lng) > SearchRadius)
+        {
+            error = L["That spot is outside the walking radius. Click closer to the meeting point."];
+            return;
+        }
+        var name = newPlace.Name.Trim();
+        var id = await Places.SuggestPlaceAsync(name, newPlace.Cuisine, newPlace.Address, lat, lng, me!.Name);
+        foreach (var dish in (newPlace.Dishes ?? "").Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(10))
+            await Dishes.SuggestDishAsync(id, name, dish, me.Name); // drinks are skipped
+        await ToggleSuggestPlace(); // closes the form and removes the pin
+        notice = L["Thanks! {0} will show up for everyone once the organiser approves it.", name];
+    });
+
+    void OpenDishForm(PlaceInfo p) => (dishFormFor, newDish, removeFor) = (p.Id, "", null);
+
+    void OpenRemoveForm(PlaceInfo p) => (removeFor, removeWhat, dishFormFor) = (p.Id, "", null);
+
+    Task SubmitRemoval(PlaceInfo p) => Act(async () =>
+    {
+        var dish = removeWhat;
+        if (dish.Length == 0) await Places.SuggestRemovalAsync(p, me!.Name);
+        else await Dishes.SuggestDishAsync(p.Id, p.Name, dish, me!.Name, remove: true);
+        (removeFor, removeWhat) = (null, "");
+        notice = L["Thanks! {0} will be removed for everyone once the organiser approves it.", dish.Length == 0 ? p.Name : dish];
+    });
+
+    Task SubmitDish(PlaceInfo p) => Act(async () =>
+    {
+        var dish = newDish.Trim();
+        if (!await Dishes.SuggestDishAsync(p.Id, p.Name, dish, me!.Name))
+        {
+            error = L["Food only: drinks can't be added."];
+            return;
+        }
+        (dishFormFor, newDish) = (null, "");
+        notice = L["Thanks! {0} will show up for everyone once the organiser approves it.", dish];
+    });
+
+    static double DistanceMeters(double lat1, double lng1, double lat2, double lng2)
+    {
+        const double R = 6_371_000, rad = Math.PI / 180;
+        var a = Math.Pow(Math.Sin((lat2 - lat1) * rad / 2), 2)
+              + Math.Cos(lat1 * rad) * Math.Cos(lat2 * rad) * Math.Pow(Math.Sin((lng2 - lng1) * rad / 2), 2);
+        return 2 * R * Math.Asin(Math.Sqrt(a));
+    }
 
     async Task Act(Func<Task> action)
     {
-        error = null;
+        error = null; notice = null;
+        // Every change goes through here, so this is the server-side gate (the disabled buttons are only a hint).
+        // Approval is re-read each time, so taking it away on the Settings page works at once.
+        if (signInOn && me is not null) me.Approved = await Sessions.IsVoterApprovedAsync(me.Id);
+        if (!CanAct)
+        {
+            error = !signInOn ? L["Couldn't save your name. Reload the page to try again."]
+                : me is null ? L["Sign in with Google to vote."]
+                : L["The organiser hasn't let you vote yet."];
+            return;
+        }
         try { await action(); }
         catch (PollRuleException ex) { error = RuleMessage(ex); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -644,7 +987,7 @@ else
 
     async Task CopyLink()
     {
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", Nav.Uri); copied = true; }
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", InviteLink); copied = true; }
         catch (JSException) { error = L["Couldn't copy. Select the link and copy it manually."]; }
     }
 
@@ -652,7 +995,9 @@ else
     {
         Sessions.Changed -= OnSessionChanged;
         Dishes.LookupFinished -= OnDishLookupFinished;
+        Places.SuggestionsChanged -= OnPlacesChanged;
         clock?.Dispose();
+        self?.Dispose();
         try
         {
             if (map is not null) await map.DisposeAsync();

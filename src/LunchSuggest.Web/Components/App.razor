@@ -17,12 +17,11 @@
     <link rel="stylesheet" href="@Assets["LunchSuggest.Web.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/png" href="favicon.png" />
-    @* No prerender: pages need JS (map, local storage) and would otherwise load data twice. *@
-    <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
 <body>
-    <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+    <Routes @rendermode="PageRenderMode" />
     <ReconnectModal />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -30,3 +29,13 @@
 </body>
 
 </html>
+
+@code {
+    [CascadingParameter] HttpContext HttpContext { get; set; } = default!;
+
+    // Interactive, without prerender: pages need JS (map, local storage) and would otherwise load data twice.
+    // Pages marked [ExcludeFromInteractiveRouting] (Settings) render as plain server pages: every request, including
+    // its form post, then really goes through the server and the "this computer only" check.
+    IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? new InteractiveServerRenderMode(prerender: false) : null;
+}

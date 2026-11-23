@@ -1,0 +1,282 @@
+@page "/settings"
+@attribute [ExcludeFromInteractiveRouting]
+@using System.Globalization
+@inject ILunchSessions Sessions
+@inject GroupSettings Defaults
+@inject IConfiguration Config
+
+<PageTitle>@L["Settings"]</PageTitle>
+
+@if (!allowed)
+{
+    @* The middleware already answers 404; this only guards against the page being rendered some other way. *@
+    <h3>@L["Not Found"]</h3>
+}
+else if (Form is not null) @* first render happens while the stored settings are still loading *@
+{
+    <div style="max-width: 40rem">
+        <h1 class="h3 mb-1">⚙️ @L["Settings"]</h1>
+        <p class="small text-muted">@L["Only this computer can open this page."]</p>
+
+        @if (saved)
+        {
+            <div class="alert alert-success" role="status">@L["Saved. Pages already open show the changes after a reload."]</div>
+        }
+        @if (error is not null)
+        {
+            <div class="alert alert-warning" role="alert">@error</div>
+        }
+
+        <EditForm Model="Form" FormName="settings" OnSubmit="SaveAsync" class="row g-3">
+            <h2 class="h5 col-12 mt-4 mb-0">@L["Lunch group"]</h2>
+            <div class="col-12">
+                <label class="form-label" for="title">@L["Group name"]</label>
+                <InputText id="title" class="form-control" @bind-Value="Form.Title" maxlength="80" required />
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="address">@L["Address"]</label>
+                <InputText id="address" class="form-control" @bind-Value="Form.Address" maxlength="200" />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="lat">@L["Latitude"]</label>
+                <InputText id="lat" class="form-control" @bind-Value="Form.Lat" inputmode="decimal" required />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="lng">@L["Longitude"]</label>
+                <InputText id="lng" class="form-control" @bind-Value="Form.Lng" inputmode="decimal" required />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="radius">@L["Walking radius (m)"]</label>
+                <InputText id="radius" class="form-control" @bind-Value="Form.Radius" inputmode="numeric" required />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="deadline">@L["Voting deadline (empty = no deadline)"]</label>
+                <InputText id="deadline" type="time" class="form-control" @bind-Value="Form.Deadline" />
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="tz">@L["Time zone (IANA, e.g. Asia/Ho_Chi_Minh; empty = server time)"]</label>
+                <InputText id="tz" class="form-control" @bind-Value="Form.TimeZone" maxlength="64" />
+            </div>
+
+            <h2 class="h5 col-12 mt-4 mb-0">@L["Display"]</h2>
+            <div class="col-sm-8">
+                <label class="form-label" for="siteTitle">@L["Site title (top bar and browser tab)"]</label>
+                <InputText id="siteTitle" class="form-control" @bind-Value="Form.SiteTitle" maxlength="40" placeholder="LunchSuggest" />
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label" for="icon">@L["Landing button icon"]</label>
+                <InputText id="icon" class="form-control emoji-input" @bind-Value="Form.LandingIcon" maxlength="16" placeholder="🎲" />
+            </div>
+            <p class="col-12 form-text mt-1">@L["One emoji, e.g. 🍜. Empty = a different food icon every day."]</p>
+            <div class="col-12">
+                <label class="form-label" for="shareUrl">@L["Share link address"]</label>
+                <InputText id="shareUrl" class="form-control" @bind-Value="Form.ShareUrl" maxlength="200" placeholder="http://10.3.0.54:8686" inputmode="url" />
+                <div class="form-text">@L["The address other computers use to open the site, e.g. http://10.3.0.54:8686. Empty = the address in the viewer's browser."]</div>
+            </div>
+
+            <h2 class="h5 col-12 mt-4 mb-0">@L["Poll"]</h2>
+            <div class="col-sm-6">
+                <label class="form-label" for="maxOptions">@L["Max options per poll (2–20)"]</label>
+                <InputText id="maxOptions" class="form-control" @bind-Value="Form.MaxOptions" inputmode="numeric" required />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="runnerUpDays">@L["Bring back runner-ups from the last N days (0 = off)"]</label>
+                <InputText id="runnerUpDays" class="form-control" @bind-Value="Form.RunnerUpDays" inputmode="numeric" required />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="picksMin">@L["Dishes the app adds to a new poll: at least"]</label>
+                <InputText id="picksMin" class="form-control" @bind-Value="Form.PicksMin" inputmode="numeric" required />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="picksMax">@L["…at most (0–{0})", GroupSettings.PicksLimit]</label>
+                <InputText id="picksMax" class="form-control" @bind-Value="Form.PicksMax" inputmode="numeric" required />
+            </div>
+            <p class="col-12 form-text mt-1">@L["Runner-ups and random dishes count toward these. 0 = new polls start empty. Each new dish can take about 10 seconds to look up."]</p>
+            <div class="col-12">
+                <label class="form-label" for="holidays">@L["Public holidays (no poll)"]</label>
+                <InputTextArea id="holidays" class="form-control" rows="2" @bind-Value="Form.Holidays" placeholder="24/11/2026, 01/01/2027" />
+                <div class="form-text">@L["Dates like 24/11/2026, separated by commas or new lines. Like weekends, these days get no poll: Create new poll skips to the next working day."]</div>
+            </div>
+
+            <div class="col-12 d-flex gap-2 mt-4">
+                <button type="submit" class="btn btn-primary">@L["Save"]</button>
+                <a class="btn btn-outline-secondary" href="today" target="_top">@L["← Back to the poll"]</a>
+            </div>
+        </EditForm>
+
+        <h2 class="h5 mt-5 mb-1">@L["Reset a poll"]</h2>
+        <p class="form-text mt-0">@L["Deletes an open poll with all its options, votes and random pick, so anyone can create a new one. Closed polls stay in history."]</p>
+        @if (resetDone is { } done)
+        {
+            <div class="alert alert-success" role="status">@L["The poll for {0} was reset.", LongDate(done)]</div>
+        }
+        @if (polls.Count == 0)
+        {
+            <p class="text-muted">@L["No poll for today or the next weekday yet."]</p>
+        }
+        else
+        {
+            @* One form; each button posts its poll's date. The browser asks before anything is deleted. *@
+            <form method="post" @formname="reset" @onsubmit="ResetAsync">
+                <AntiforgeryToken />
+                <ul class="list-group">
+                    @foreach (var p in polls)
+                    {
+                        var label = p.Day == p.Today ? L["Today, {0}", LongDate(p.Day)]
+                            : p.Day == p.Today.AddDays(1) ? L["Tomorrow, {0}", LongDate(p.Day)] : LongDate(p.Day);
+                        <li class="list-group-item d-flex align-items-center gap-2">
+                            <div class="me-auto">
+                                <span class="fw-semibold">@label</span>
+                                @if (p.Closed) { <span class="badge text-bg-secondary ms-1">@L["closed"]</span> }
+                                <div class="small text-muted">@L["{0} options, {1} votes", p.Candidates.Count, p.Candidates.Sum(c => c.VoterNames.Count)]</div>
+                            </div>
+                            @if (p.Closed)
+                            {
+                                <span class="small text-muted">🔒 @L["Kept in history"]</span>
+                            }
+                            else
+                            {
+                                <button type="submit" class="btn btn-sm btn-outline-danger" name="ResetDay" value="@p.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)"
+                                        data-confirm="@L["Reset the poll for {0}? All its options and votes will be deleted.", LongDate(p.Day)]"
+                                        onclick="return confirm(this.dataset.confirm)">
+                                    🗑️ @L["Reset this poll"]
+                                </button>
+                            }
+                        </li>
+                    }
+                </ul>
+            </form>
+        }
+
+        @* Suggestions and sign-ins to review update live; the rest of this page stays a plain (static) page. *@
+        <ReviewQueue @rendermode="@(new InteractiveServerRenderMode(prerender: false))" />
+    </div>
+}
+
+@code {
+    [CascadingParameter] HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm(FormName = "settings")] SettingsForm? Form { get; set; }
+
+    // The date of the poll whose reset button was pressed (yyyy-MM-dd).
+    [SupplyParameterFromForm(FormName = "reset")] string? ResetDay { get; set; }
+
+    bool allowed, saved;
+    string? error;
+    DateOnly? resetDone;
+    List<SessionView> polls = []; // today's and the next weekday's, when they exist
+    bool autoApprove = true; // kept as is when the main form is saved (switched in ReviewQueue)
+
+    string LongDate(DateOnly d) => d.ToString(L["dddd d MMM"].Value, CultureInfo.CurrentCulture);
+
+    async Task LoadPollsAsync()
+    {
+        var today = await Sessions.GetAsync(Defaults.Code, null, null);
+        if (today is null) { polls = []; return; }
+        var holidays = (await Sessions.GetGroupAsync(Defaults.Code))?.Holidays;
+        var next = await Sessions.GetAsync(Defaults.Code, PollDays.OnOrAfter(today.Today.AddDays(1), holidays), null);
+        polls = new[] { today, next }.Where(p => p is { HasPoll: true }).Select(p => p!).ToList();
+    }
+
+    async Task ResetAsync()
+    {
+        if (!allowed) return;
+        if (!DateOnly.TryParseExact(ResetDay, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+        {
+            error = L["That didn't work. Reload the page and try again."];
+            return;
+        }
+        try
+        {
+            if (await Sessions.ResetPollAsync(Defaults.Code, day)) resetDone = day;
+        }
+        catch (ArgumentException ex) { error = L["Couldn't save: {0}", ex.Message]; }
+        await LoadPollsAsync();
+    }
+
+    /// <summary>Text fields, so a typo comes back as a message instead of a silent 0.</summary>
+    sealed class SettingsForm
+    {
+        public string Title { get; set; } = "";
+        public string? Address { get; set; }
+        public string Lat { get; set; } = "";
+        public string Lng { get; set; } = "";
+        public string Radius { get; set; } = "";
+        public string? Deadline { get; set; }
+        public string? TimeZone { get; set; }
+        public string? SiteTitle { get; set; }
+        public string? LandingIcon { get; set; }
+        public string MaxOptions { get; set; } = "";
+        public string PicksMin { get; set; } = "";
+        public string PicksMax { get; set; } = "";
+        public string RunnerUpDays { get; set; } = "";
+        public string? ShareUrl { get; set; }
+        public string? Holidays { get; set; }
+
+        static string Int(int v) => v.ToString(CultureInfo.InvariantCulture);
+
+        public static SettingsForm From(GroupSettings g) => new()
+        {
+            Title = g.Title, Address = g.Address, TimeZone = g.TimeZone, SiteTitle = g.SiteTitle, LandingIcon = g.LandingIcon, ShareUrl = g.ShareUrl,
+            Lat = g.Lat.ToString("0.#######", CultureInfo.InvariantCulture),
+            Lng = g.Lng.ToString("0.#######", CultureInfo.InvariantCulture),
+            Radius = Int(g.RadiusMeters), MaxOptions = Int(g.MaxOptions), PicksMin = Int(g.PicksMin), PicksMax = Int(g.PicksMax),
+            RunnerUpDays = Int(g.RunnerUpDays),
+            Deadline = g.Deadline?.ToString("HH:mm", CultureInfo.InvariantCulture),
+            Holidays = string.Join(", ", (g.Holidays ?? []).Select(d => d.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture))),
+        };
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        allowed = HttpContext is { } http
+            && AdminAccess.IsAllowed(http.Connection.RemoteIpAddress, http.Connection.LocalPort, Config.GetValue<int?>("Admin:Port"));
+        if (!allowed) return;
+        // On a post, Form holds what was submitted; otherwise start from the stored settings.
+        Form ??= SettingsForm.From(await Sessions.GetGroupAsync(Defaults.Code) ?? Defaults);
+        await LoadPollsAsync();
+        autoApprove = (await Sessions.GetGroupAsync(Defaults.Code))?.AutoApprove ?? true;
+    }
+
+    async Task SaveAsync()
+    {
+        if (!allowed || Form is null) return;
+        // Accept "21,0014" as well as "21.0014": Vietnamese uses a decimal comma.
+        static bool Number(string s, out double v) =>
+            double.TryParse(s.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+        static bool Whole(string s, out int v) => int.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out v);
+
+        if (!Number(Form.Lat, out var lat) || !Number(Form.Lng, out var lng) || !Whole(Form.Radius, out var radius)
+            || !Whole(Form.MaxOptions, out var maxOptions) || !Whole(Form.PicksMin, out var picksMin)
+            || !Whole(Form.PicksMax, out var picksMax) || !Whole(Form.RunnerUpDays, out var runnerUpDays))
+        {
+            error = L["Please enter numbers in the number fields."];
+            return;
+        }
+        TimeOnly? deadline = null;
+        if (!string.IsNullOrWhiteSpace(Form.Deadline))
+        {
+            if (!TimeOnly.TryParseExact(Form.Deadline.Trim(), ["HH:mm", "HH:mm:ss"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            {
+                error = L["The deadline must look like 11:30."];
+                return;
+            }
+            deadline = d;
+        }
+        if (PollDays.Parse(Form.Holidays) is not { } holidays)
+        {
+            error = L["Holidays must be dates like 24/11/2026."];
+            return;
+        }
+
+        try
+        {
+            await Sessions.UpdateGroupAsync(new GroupSettings(Defaults.Code, Form.Title, lat, lng, radius, Form.TimeZone, Form.Address, deadline,
+                Form.SiteTitle, Form.LandingIcon, maxOptions, picksMin, picksMax, runnerUpDays, Form.ShareUrl, autoApprove, holidays));
+            saved = true;
+            await LoadPollsAsync(); // the next poll day may have moved
+        }
+        // The Voting module's validation messages; this page is for the admin only.
+        catch (ArgumentException ex) { error = L["Couldn't save: {0}", ex.Message]; }
+    }
+}

@@ -97,19 +97,7 @@ internal sealed class OverturePlaceProvider(HttpClient http, OvertureOptions opt
         cmd.ExecuteNonQuery();
     }
 
-    // Whole words of the snake_case category, so "pho" doesn't match "mobile_phone_store".
-    static readonly HashSet<string> FoodWords = ["restaurant", "cafe", "coffee", "bakery", "food", "bistro", "diner", "eatery",
-        "canteen", "buffet", "noodle", "noodles", "pho", "bbq", "barbecue", "grill", "sandwich", "burger", "pizza", "sushi",
-        "dessert", "tea", "juice", "smoothie", "snack"];
-    static readonly HashSet<string> NotFoodWords = ["supplier", "wholesale", "equipment", "delivery", "consultant", "school",
-        "grocery", "supermarket", "catering", "internet", "pet", "store", "distributor", "manufacturer", "market"];
-
-    internal static bool IsFood(string? category)
-    {
-        if (category is null) return false;
-        var words = category.Split('_');
-        return words.Any(FoodWords.Contains) && !words.Any(NotFoodWords.Contains);
-    }
+    internal static bool IsFood(string? category) => FoodCategory.IsFood(category);
 
     internal static string Humanize(string category) => category.Replace('_', ' ');
 

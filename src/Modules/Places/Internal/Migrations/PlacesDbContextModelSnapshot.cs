@@ -70,6 +70,80 @@ namespace LunchSuggest.Modules.Places.Internal.Migrations
 
                     b.ToTable("Places", "places");
                 });
+
+            modelBuilder.Entity("LunchSuggest.Modules.Places.Internal.RemovedPlace", b =>
+                {
+                    b.Property<string>("PlaceId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("Approved")
+                        .HasColumnType("boolean");
+
+                    b.Property<double>("Lat")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("Lng")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("SuggestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SuggestedBy")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("PlaceId");
+
+                    b.ToTable("RemovedPlaces", "places");
+                });
+
+            modelBuilder.Entity("LunchSuggest.Modules.Places.Internal.SuggestedPlace", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("Approved")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Cuisine")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<double>("Lat")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("Lng")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset>("SuggestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SuggestedBy")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SuggestedPlaces", "places");
+                });
 #pragma warning restore 612, 618
         }
     }

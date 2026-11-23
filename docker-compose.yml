@@ -3,17 +3,37 @@
 services:
   web:
     build: .
-    ports: ["8686:8080"]
+    # 8686: the site for everyone. 8690: the same site plus /settings, published on this computer's loopback only,
+    # so LAN machines can't connect to it (Docker Desktop hides callers' IPs, so an IP check alone can't tell them apart).
+    ports: ["8686:8080", "127.0.0.1:8690:8081"]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080;8081"
+      Admin__Port: "8081"
+      # Address in the invite link (this PC's LAN IP). Only fills an empty setting; change it later on the Settings page.
+      Lunch__ShareUrl: http://10.3.0.54:8686
       ConnectionStrings__Lunch: Host=db;Port=5432;Database=lunch;Username=lunch;Password=lunch
       Search__OllamaUrl: http://ollama:11434
       Dishes__SearxngUrl: http://searxng:8080
+      # Google sign-in for voting (README, "Sign-in"); empty = off. Needs the site on HTTPS (the ngrok service below).
+      Google__ClientId: ${GOOGLE_CLIENT_ID:-}
+      Google__ClientSecret: ${GOOGLE_CLIENT_SECRET:-}
     volumes: [dpkeys:/keys]
     depends_on:
       db: { condition: service_healthy }
       ollama: { condition: service_started }
       searxng: { condition: service_started }
+    restart: unless-stopped
+
+  # Public HTTPS address for the site (Google sign-in needs HTTPS). Only starts with COMPOSE_PROFILES=ngrok in .env;
+  # see .env.example and README "Sign-in".
+  ngrok:
+    image: ngrok/ngrok:latest
+    profiles: [ngrok]
+    command: ["http", "--url=${NGROK_DOMAIN:-}", "web:8080"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    depends_on: [web]
     restart: unless-stopped
 
   db:

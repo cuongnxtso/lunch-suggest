@@ -67,5 +67,10 @@ h1:focus {
 }
 .map { height: 420px; border-radius: .5rem; z-index: 0; }
 .place-list { max-height: 420px; overflow-y: auto; }
+.history-icon { font-size: 2rem; line-height: 1; min-width: 2.5rem; text-align: center; }
+.place-list .place-selected { background: #fff3e6; border-left: 4px solid #fd7e14; } /* matches the orange 'selected' marker in map.js */
 .picked-banner { font-size: 1.25rem; }
 
+
+/* Emoji fields: color emoji fonts first, so the icon shows as it will on the landing page. */
+.emoji-input { font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", var(--bs-body-font-family); font-size: 1.25rem; }

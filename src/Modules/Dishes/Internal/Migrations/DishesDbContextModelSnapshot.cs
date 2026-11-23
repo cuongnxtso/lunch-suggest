@@ -41,6 +41,48 @@ namespace LunchSuggest.Modules.Dishes.Internal.Migrations
 
                     b.ToTable("PlaceDishes", "dishes");
                 });
+
+            modelBuilder.Entity("LunchSuggest.Modules.Dishes.Internal.SuggestedDish", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Approved")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Dish")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("PlaceId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PlaceName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("Remove")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("SuggestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SuggestedBy")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlaceId");
+
+                    b.ToTable("SuggestedDishes", "dishes");
+                });
 #pragma warning restore 612, 618
         }
     }

@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using LunchSuggest.Modules.Places;
 using LunchSuggest.Modules.Places.Internal;
+using LunchSuggest.Modules.Voting;
 using LunchSuggest.Modules.Voting.Internal;
 
 namespace LunchSuggest.Tests;
@@ -54,9 +55,9 @@ public class PlacesTests
     [Theory]
     [InlineData("vietnamese_restaurant", true, "vietnamese")]
     [InlineData("pho_restaurant", true, "pho")]
-    [InlineData("coffee_shop", true, null)]
+    [InlineData("coffee_shop", false, null)]  // drinks, not lunch
     [InlineData("fast_food_restaurant", true, null)]
-    [InlineData("bubble_tea", true, "bubble tea")]
+    [InlineData("bubble_tea", false, null)]
     [InlineData("restaurant_equipment_supplier", false, null)]
     [InlineData("food_delivery_service", false, null)]
     [InlineData("hair_salon", false, null)]
@@ -70,6 +71,18 @@ public class PlacesTests
         Assert.Equal(isFood, OverturePlaceProvider.IsFood(category));
         if (isFood) Assert.Equal(cuisine, OverturePlaceProvider.CuisineOf(category));
     }
+
+    [Theory]
+    [InlineData("coffee shop", true)]   // Overture, humanized
+    [InlineData("cafe", true)]          // Overpass / Google
+    [InlineData("bubble tea", true)]
+    [InlineData("wine_bar", true)]
+    [InlineData("bar_and_grill", false)]
+    [InlineData("sushi bar", false)]
+    [InlineData("restaurant", false)]
+    [InlineData("vietnamese", false)]
+    public void Drink_only_places_are_recognised(string category, bool drinkOnly) =>
+        Assert.Equal(drinkOnly, FoodCategory.IsDrinkOnly(category));
 
     [Theory]
     [InlineData("Phở Cội", "pho noodle soup")]
@@ -123,8 +136,21 @@ public class DishesTests
         var dishes = LunchSuggest.Modules.Dishes.Internal.DishExtractor.Parse("""
             {"dishes": ["Cafe Bảo Long", "Món Tráng Miệng", "Mát mát làm bát bún các a zai ơi nhé", "Bạc xỉu"]}
             """, "Bảo Long Cafe");
-        Assert.Equal(["Bạc xỉu"], dishes);
+        Assert.Empty(dishes); // "Bạc xỉu" is a drink
     }
+
+    [Theory]
+    [InlineData("Cà phê muối", true)]
+    [InlineData("Trà đào cam sả", true)]
+    [InlineData("Bia hơi", true)]
+    [InlineData("Sinh tố bơ", true)]
+    [InlineData("Egg coffee", true)]
+    [InlineData("Cold Brew Túi Lọc", true)]
+    [InlineData("Bò nhúng bia", false)]   // cooked in beer: food
+    [InlineData("Bánh mì", false)]
+    [InlineData("Chè thập cẩm", false)]
+    public void Drinks_are_not_dishes(string dish, bool drink) =>
+        Assert.Equal(drink, LunchSuggest.Modules.Dishes.Internal.DishExtractor.IsDrink(dish));
 
     [Fact]
     public void Dish_named_in_the_place_name_is_kept() =>
@@ -236,7 +262,8 @@ public class VotingTests
         var afternoon = LunchSessions.ClockFor("Asia/Ho_Chi_Minh", deadline, new DateTime(2026, 11, 17, 7, 0, 0, DateTimeKind.Utc)); // 14:00 Hanoi
         Assert.Equal(new DateOnly(2026, 11, 17), LunchSessions.NextPollDay(morning));
         Assert.Equal(new DateOnly(2026, 11, 18), LunchSessions.NextPollDay(afternoon));
-        Assert.Equal(new DateOnly(2026, 11, 17), LunchSessions.NextPollDay(LunchSessions.ClockFor("Asia/Ho_Chi_Minh", null, DateTime.UtcNow.Date)));
+        // No deadline: always today, even late in the day.
+        Assert.Equal(new DateOnly(2026, 11, 17), LunchSessions.NextPollDay(LunchSessions.ClockFor("Asia/Ho_Chi_Minh", null, new DateTime(2026, 11, 17, 15, 0, 0, DateTimeKind.Utc))));
 
         // Tomorrow's poll, created this afternoon, stays open until tomorrow 11:30.
         var tomorrow = LunchSessions.ClockFor("Asia/Ho_Chi_Minh", deadline, new DateTime(2026, 11, 17, 7, 0, 0, DateTimeKind.Utc), new DateOnly(2026, 11, 18));
@@ -253,6 +280,105 @@ public class VotingTests
         Assert.Equal(3, LunchSessions.DeadlineContenders([Option(Tue, "A", 0), Option(Tue, "B", 0), Option(Tue, "C", 0)]).Count);
         Assert.Single(LunchSessions.DeadlineContenders([Option(Tue, "A", 0)])); // a lone option with no votes still gets "chosen"
         Assert.Empty(LunchSessions.DeadlineContenders([]));
+    }
+}
+
+public class SettingsTests
+{
+    static readonly System.Net.IPAddress Lan = System.Net.IPAddress.Parse("10.3.0.77"), DockerGateway = System.Net.IPAddress.Parse("172.18.0.1");
+
+    [Fact]
+    public void Without_an_admin_port_only_loopback_callers_get_in()
+    {
+        Assert.True(LunchSuggest.Web.AdminAccess.IsAllowed(System.Net.IPAddress.Loopback, 5063, null));
+        Assert.True(LunchSuggest.Web.AdminAccess.IsAllowed(System.Net.IPAddress.IPv6Loopback, 5063, null));
+        Assert.True(LunchSuggest.Web.AdminAccess.IsAllowed(System.Net.IPAddress.Parse("::ffff:127.0.0.1"), 5063, null));
+        Assert.False(LunchSuggest.Web.AdminAccess.IsAllowed(Lan, 5063, null));
+        Assert.False(LunchSuggest.Web.AdminAccess.IsAllowed(null, 5063, null));
+    }
+
+    [Fact]
+    public void With_an_admin_port_only_that_port_counts_whatever_the_ip()
+    {
+        // In Docker every caller looks like the gateway, so the IP can't tell this computer from the LAN.
+        Assert.True(LunchSuggest.Web.AdminAccess.IsAllowed(DockerGateway, 8081, 8081));
+        Assert.False(LunchSuggest.Web.AdminAccess.IsAllowed(DockerGateway, 8080, 8081));
+        Assert.False(LunchSuggest.Web.AdminAccess.IsAllowed(System.Net.IPAddress.Loopback, 8080, 8081));
+    }
+
+    [Theory]
+    [InlineData("http://10.3.0.54:8686", "http://10.3.0.54:8686")]
+    [InlineData(" http://10.3.0.54:8686/ ", "http://10.3.0.54:8686")]      // trailing slash dropped, so "/today" can be appended
+    [InlineData("https://lunch.example.com", "https://lunch.example.com")]
+    [InlineData("", null)]                                                // empty = the viewer's own address
+    public void Share_address_is_normalized(string input, string? expected) =>
+        Assert.Equal(expected, LunchSessions.ShareUrlOrNull(input));
+
+    [Theory]
+    [InlineData("10.3.0.54:8686")]                   // no scheme
+    [InlineData("javascript:alert(1)")]
+    [InlineData("ftp://10.3.0.54")]
+    [InlineData("http://10.3.0.54:8686/today")]      // a path would double up with the page's
+    [InlineData("http://10.3.0.54:8686/?x=1")]
+    [InlineData("http://user:pw@10.3.0.54:8686")]
+    public void Bad_share_addresses_are_refused(string input) =>
+        Assert.Throws<ArgumentException>(() => LunchSessions.ShareUrlOrNull(input));
+
+    [Fact]
+    public void Only_todays_and_tomorrows_polls_can_be_reset()
+    {
+        var today = new DateOnly(2026, 11, 18);
+        Assert.True(LunchSessions.CanReset(today, today, closed: false));
+        Assert.True(LunchSessions.CanReset(today.AddDays(1), today, closed: false));
+        Assert.False(LunchSessions.CanReset(today, today, closed: true)); // past the deadline: the result stays in history
+        Assert.False(LunchSessions.CanReset(today.AddDays(-1), today, closed: true)); // history: runner-ups come from it
+        Assert.False(LunchSessions.CanReset(today.AddDays(2), today, closed: false));
+    }
+
+    static GroupSettings Valid => new("default", " Sport Hotel lunch ", 21.0014, 105.8029, 300, "Asia/Ho_Chi_Minh", "  ", new TimeOnly(11, 30));
+
+    [Fact]
+    public void Group_settings_are_tidied()
+    {
+        var g = LunchSessions.Validated(Valid with { SiteTitle = "  Cơm trưa ", LandingIcon = " " });
+        Assert.Equal("Sport Hotel lunch", g.Title);
+        Assert.Null(g.Address); // blank = none
+        Assert.Equal("Cơm trưa", g.SiteTitle);
+        Assert.Null(g.LandingIcon); // blank = the daily icon
+        LunchSessions.Validated(Valid with { LandingIcon = "👨‍👩‍👧‍👦", PicksMin = 0, PicksMax = 0, RunnerUpDays = 0 }); // ZWJ emoji, empty polls, no runner-ups
+    }
+
+    [Theory]
+    [InlineData("lat")]
+    [InlineData("nan")]
+    [InlineData("radius")]
+    [InlineData("tz")]
+    [InlineData("deadline")]
+    [InlineData("title")]
+    [InlineData("maxOptions")]
+    [InlineData("picksAboveMaxOptions")]
+    [InlineData("picksAboveLimit")]
+    [InlineData("picksMinAboveMax")]
+    [InlineData("runnerUpDays")]
+    [InlineData("icon")]
+    public void Bad_group_settings_are_refused(string field)
+    {
+        var bad = field switch
+        {
+            "maxOptions" => Valid with { MaxOptions = 1 },
+            "picksAboveMaxOptions" => Valid with { MaxOptions = 3, PicksMax = 4 },
+            "picksAboveLimit" => Valid with { MaxOptions = 20, PicksMax = 9 },
+            "picksMinAboveMax" => Valid with { PicksMin = 4, PicksMax = 3 },
+            "runnerUpDays" => Valid with { RunnerUpDays = -1 },
+            "icon" => Valid with { LandingIcon = "this is not an icon at all" },
+            "lat" => Valid with { Lat = 95 },
+            "nan" => Valid with { Lng = double.NaN },
+            "radius" => Valid with { RadiusMeters = 50 },
+            "tz" => Valid with { TimeZone = "Mars/Olympus" },
+            "deadline" => Valid with { Deadline = new TimeOnly(0, 10) },
+            _ => Valid with { Title = "  " },
+        };
+        Assert.Throws<ArgumentException>(() => LunchSessions.Validated(bad));
     }
 }
 
@@ -328,4 +454,156 @@ public class DishIconTests
     [Fact]
     public void Place_name_is_used_when_the_option_is_a_place() =>
         Assert.Equal("🍜", LunchSuggest.Web.DishIcon.For(null, "Phở Cội", null));
+}
+
+public class SignInTests
+{
+    static System.Security.Claims.ClaimsPrincipal User(params (string Type, string Value)[] claims) =>
+        new(new System.Security.Claims.ClaimsIdentity(claims.Select(c => new System.Security.Claims.Claim(c.Type, c.Value)), "test"));
+
+    [Fact]
+    public void A_signed_in_account_votes_under_its_google_id_and_display_name()
+    {
+        var v = LunchSuggest.Web.GoogleSignIn.Voter(User(("sub", "1234"), ("name", "Nguyễn Văn A"), ("email", "a@gmail.com")));
+        Assert.Equal(("g-1234", "Nguyễn Văn A", "a@gmail.com"), v);
+        // No display name: the part of the e-mail before the @ stands in (the full address never shows on polls).
+        Assert.Equal("a", LunchSuggest.Web.GoogleSignIn.Voter(User(("sub", "1"), ("email", "a@gmail.com")))?.Name);
+    }
+
+    [Fact]
+    public void Visitors_who_are_not_signed_in_or_have_no_email_are_not_voters()
+    {
+        Assert.Null(LunchSuggest.Web.GoogleSignIn.Voter(new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity())));
+        Assert.Null(LunchSuggest.Web.GoogleSignIn.Voter(User(("name", "No sub"), ("email", "x@gmail.com"))));
+        Assert.Null(LunchSuggest.Web.GoogleSignIn.Voter(User(("sub", "1"), ("name", "No e-mail"))));
+    }
+
+    [Theory]
+    [InlineData("/today", "/today")]
+    [InlineData("/poll/2026-11-18", "/poll/2026-11-18")]
+    [InlineData("//evil.com", "/")]
+    [InlineData(@"/\evil.com", "/")]
+    [InlineData("https://evil.com", "/")]
+    [InlineData(null, "/")]
+    public void Sign_in_only_returns_to_pages_on_this_site(string? url, string expected) =>
+        Assert.Equal(expected, LunchSuggest.Web.GoogleSignIn.LocalOrHome(url));
+
+    static readonly string[] Listed = ["Đào Đình Luyện", "Nguyễn Huỳnh Đức", "Phạm Đỗ Duy", "Trương Trọng Lợi"];
+
+    [Theory]
+    [InlineData("Đào Đình Luyện", true)]
+    [InlineData("Dao Đinh Luyen", true)]       // the spellings from the request
+    [InlineData("Nguyen Huynh Duc", true)]
+    [InlineData("Pham Do Duy", true)]
+    [InlineData("Truong Trong Loi", true)]
+    [InlineData("Lợi Trương Trọng", true)]     // Google's given-name-first order
+    [InlineData("  PHẠM   ĐỖ duy ", true)]
+    [InlineData("Phạm Duy", false)]           // a word short is someone else
+    [InlineData("Phạm Đỗ Duy Anh", false)]
+    [InlineData("", false)]
+    public void Listed_names_match_with_or_without_accents(string googleName, bool expected) =>
+        Assert.Equal(expected, LunchSuggest.Web.GoogleSignIn.IsListed(googleName, Listed));
+}
+
+public class SuggestionTests
+{
+    [Fact]
+    public void Suggested_dishes_come_first_and_each_dish_shows_once()
+    {
+        var dishes = LunchSuggest.Modules.Dishes.Internal.DishGuide.WithSuggested(["Bún chả", "Nem rán"], ["bún chả ", "Phở bò"]);
+        Assert.Equal(["Bún chả", "Nem rán", "Phở bò"], dishes);
+        Assert.Equal(["Bún chả"], LunchSuggest.Modules.Dishes.Internal.DishGuide.WithSuggested(["Bún chả"], null)); // never looked up
+    }
+
+    [Fact]
+    public void A_suggested_place_is_tidied_and_waits_for_approval()
+    {
+        var p = LunchSuggest.Modules.Places.Internal.PlaceDirectory.Validated("  Phở Thìn ", " ", null, 21.0, 105.8, "Cuong NX");
+        Assert.Equal("Phở Thìn", p.Name);
+        Assert.Null(p.Cuisine); // blank = none
+        Assert.StartsWith(LunchSuggest.Modules.Places.PlacesModule.SuggestedIdPrefix, p.Id);
+        Assert.False(p.Approved);
+    }
+
+    [Theory]
+    [InlineData("", 21.0, 105.8)]            // no name
+    [InlineData("Phở", 91.0, 105.8)]         // not a point on Earth
+    [InlineData("Phở", double.NaN, 105.8)]
+    public void Bad_place_suggestions_are_refused(string name, double lat, double lng) =>
+        Assert.Throws<ArgumentException>(() => LunchSuggest.Modules.Places.Internal.PlaceDirectory.Validated(name, null, null, lat, lng, "Cuong NX"));
+
+    [Fact]
+    public void Place_names_have_a_length_limit() =>
+        Assert.Throws<ArgumentException>(() =>
+            LunchSuggest.Modules.Places.Internal.PlaceDirectory.Validated(new string('a', 121), null, null, 21.0, 105.8, "Cuong NX"));
+}
+
+public class WeekdayTests
+{
+    static readonly TimeOnly Deadline = new(11, 30);
+    // Hanoi is UTC+7: 03:00 UTC = 10:00 there (before the deadline), 07:00 UTC = 14:00 (after).
+    static DateOnly NextPoll(int day, int utcHour) =>
+        LunchSessions.NextPollDay(LunchSessions.ClockFor("Asia/Ho_Chi_Minh", Deadline, new DateTime(2026, 11, day, utcHour, 0, 0, DateTimeKind.Utc)));
+
+    [Fact]
+    public void Polls_skip_the_weekend()
+    {
+        Assert.Equal(new DateOnly(2026, 11, 20), NextPoll(20, 3));  // Friday morning: today
+        Assert.Equal(new DateOnly(2026, 11, 23), NextPoll(20, 7));  // Friday afternoon: Monday, not Saturday
+        Assert.Equal(new DateOnly(2026, 11, 23), NextPoll(21, 3));  // Saturday: Monday
+        Assert.Equal(new DateOnly(2026, 11, 23), NextPoll(22, 3));  // Sunday morning: Monday
+        Assert.Equal(new DateOnly(2026, 11, 19), NextPoll(18, 7));  // a normal weekday: tomorrow
+        Assert.False(PollDays.IsPollDay(new DateOnly(2026, 11, 21)));
+        Assert.True(PollDays.IsPollDay(new DateOnly(2026, 11, 23)));
+    }
+
+    [Fact]
+    public void Mondays_poll_can_change_from_friday_on()
+    {
+        var friday = new DateOnly(2026, 11, 20);
+        Assert.True(LunchSessions.CanChange(friday, friday));
+        Assert.True(LunchSessions.CanChange(new DateOnly(2026, 11, 23), friday));   // Monday
+        Assert.False(LunchSessions.CanChange(new DateOnly(2026, 11, 24), friday));  // Tuesday: too far ahead
+        Assert.False(LunchSessions.CanChange(new DateOnly(2026, 11, 19), friday));  // Thursday: history
+        Assert.True(LunchSessions.CanReset(new DateOnly(2026, 11, 23), friday, closed: false));
+    }
+
+    [Fact]
+    public void Polls_skip_public_holidays()
+    {
+        DateOnly[] holidays = [new(2026, 11, 24)]; // Tuesday
+        var monday = new DateOnly(2026, 11, 23);
+        Assert.False(PollDays.IsPollDay(new DateOnly(2026, 11, 24), holidays));
+        // Monday afternoon: Wednesday's poll, and it can change (and be reset) from Monday on.
+        var mondayAfternoon = LunchSessions.ClockFor("Asia/Ho_Chi_Minh", Deadline, new DateTime(2026, 11, 23, 7, 0, 0, DateTimeKind.Utc));
+        Assert.Equal(new DateOnly(2026, 11, 25), LunchSessions.NextPollDay(mondayAfternoon, holidays));
+        Assert.True(LunchSessions.CanChange(new DateOnly(2026, 11, 25), monday, holidays));
+        Assert.True(LunchSessions.CanReset(new DateOnly(2026, 11, 25), monday, closed: false, holidays));
+        Assert.False(LunchSessions.CanChange(new DateOnly(2026, 11, 25), monday)); // without the holiday: too far ahead
+    }
+
+    [Fact]
+    public void Holiday_lists_are_read_and_tidied()
+    {
+        Assert.Equal([new DateOnly(2026, 11, 24), new DateOnly(2027, 1, 1)], PollDays.Parse("24/11/2026,\n2027-01-01"));
+        Assert.Equal([new DateOnly(2026, 9, 2)], PollDays.Parse(" 2/9/2026 "));
+        Assert.Empty(PollDays.Parse("  ")!);
+        Assert.Null(PollDays.Parse("24/13/2026"));
+        Assert.Null(PollDays.Parse("tomorrow"));
+        var g = LunchSessions.Validated(new GroupSettings("zz", "Test", 21, 105, 500, null,
+            Holidays: [new(2027, 1, 1), new(2026, 11, 24), new(2027, 1, 1)]));
+        Assert.Equal([new DateOnly(2026, 11, 24), new DateOnly(2027, 1, 1)], g.Holidays);
+    }
+}
+
+public class RemovalTests
+{
+    [Fact]
+    public void Removed_dishes_are_left_out()
+    {
+        var dishes = LunchSuggest.Modules.Dishes.Internal.DishGuide.WithSuggested(["Bún chả"], ["Phở bò", "Nem rán"], ["phở bò "]);
+        Assert.Equal(["Bún chả", "Nem rán"], dishes);
+        // A removal of a suggested dish hides it too.
+        Assert.Empty(LunchSuggest.Modules.Dishes.Internal.DishGuide.WithSuggested(["Bún chả"], null, ["BÚN CHẢ"]));
+    }
 }

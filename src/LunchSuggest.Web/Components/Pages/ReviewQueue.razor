@@ -1,0 +1,244 @@
+@*
+    The live part of the Settings page: suggestions and sign-ins to review, updated as they arrive (Blazor's SignalR connection).
+    Only the Settings page renders it, and that page is only served to this computer, so no other browser ever gets the
+    (server-signed) marker needed to start it.
+*@
+@implements IDisposable
+@using System.Globalization
+@inject IPlaceDirectory Places
+@inject IDishGuide Dishes
+@inject ILunchSessions Sessions
+@inject GroupSettings Defaults
+@inject IConfiguration Config
+@inject ILogger<ReviewQueue> Log
+
+@if (error is not null)
+{
+    <div class="alert alert-warning alert-dismissible mt-4" role="alert">
+        @error <button type="button" class="btn-close" aria-label="@L["Close"]" @onclick="() => error = null"></button>
+    </div>
+}
+
+<h2 class="h5 mt-5 mb-1">@L["Suggested places and dishes"] <span class="badge text-bg-light border fw-normal small align-middle">● @L["live"]</span></h2>
+<p class="form-text mt-0">@L["Sent from the poll page. Nobody else sees them until you approve them."]</p>
+@if (placeSuggestions.Count == 0 && dishSuggestions.Count == 0 && placeRemovals.Count == 0)
+{
+    <p class="text-muted">@L["No suggestions yet."]</p>
+}
+else
+{
+    var suggestedIds = placeSuggestions.Select(p => p.Id).ToHashSet();
+    <ul class="list-group" aria-live="polite">
+        @foreach (var p in placeSuggestions)
+        {
+            var itsDishes = dishSuggestions.Where(d => d.PlaceId == p.Id && !d.Remove).Select(d => d.Dish).ToList();
+            <li class="list-group-item d-flex align-items-center gap-2" @key="p.Id">
+                <div class="me-auto">
+                    <span class="fw-semibold">🏠 @p.Name</span>
+                    @if (!p.Approved) { <span class="badge text-bg-warning ms-1">@L["waiting"]</span> }
+                    <div class="small text-muted">
+                        @string.Join(" · ", new[] { p.Cuisine, p.Address }.Where(x => x is { Length: > 0 }))
+                        <a class="ms-1" href="@MapUrl(p.Lat, p.Lng)" target="_blank" rel="noopener">📍 @L["map"]</a>
+                    </div>
+                    @if (itsDishes.Count > 0) { <div class="small">🍜 @string.Join(", ", itsDishes)</div> }
+                    <div class="small text-muted">@L["Suggested by {0}", p.SuggestedBy]</div>
+                </div>
+                @if (!p.Approved)
+                {
+                    <button type="button" class="btn btn-sm btn-success" disabled="@busy" @onclick="() => ReviewPlace(p.Id, true)">✅ @L["Approve"]</button>
+                }
+                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@busy" @onclick="() => ReviewPlace(p.Id, false)">@(p.Approved ? L["Remove"] : L["Reject"])</button>
+            </li>
+        }
+        @* Dishes for places from the map (a suggested place's dishes are listed with it above), and dish removals. *@
+        @foreach (var d in dishSuggestions.Where(d => d.Remove || !suggestedIds.Contains(d.PlaceId)))
+        {
+            <li class="list-group-item d-flex align-items-center gap-2" @key="d.Id">
+                <div class="me-auto">
+                    <span>
+                        @if (d.Remove) { <span class="badge text-bg-danger me-1">🚫 @L["removal"]</span> }
+                        🍜 <span class="fw-semibold">@d.Dish</span> @L["at"] @d.PlaceName
+                    </span>
+                    @if (!d.Approved) { <span class="badge text-bg-warning ms-1">@L["waiting"]</span> }
+                    else if (d.Remove) { <span class="badge text-bg-secondary ms-1">@L["removed"]</span> }
+                    <div class="small text-muted">@L["Suggested by {0}", d.SuggestedBy]</div>
+                </div>
+                @if (!d.Approved)
+                {
+                    <button type="button" class="btn btn-sm btn-success" disabled="@busy" @onclick="() => ReviewDish(d.Id, true)">✅ @L["Approve"]</button>
+                }
+                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@busy" @onclick="() => ReviewDish(d.Id, false)">
+                    @(!d.Approved ? L["Reject"] : d.Remove ? L["Put back"] : L["Remove"])
+                </button>
+            </li>
+        }
+        @foreach (var r in placeRemovals)
+        {
+            <li class="list-group-item d-flex align-items-center gap-2" @key="r.PlaceId">
+                <div class="me-auto">
+                    <span class="badge text-bg-danger me-1">🚫 @L["removal"]</span>
+                    <span class="fw-semibold">🏠 @r.Name</span>
+                    @if (!r.Approved) { <span class="badge text-bg-warning ms-1">@L["waiting"]</span> }
+                    else { <span class="badge text-bg-secondary ms-1">@L["removed"]</span> }
+                    <div class="small text-muted">
+                        <a href="@MapUrl(r.Lat, r.Lng)" target="_blank" rel="noopener">📍 @L["map"]</a>
+                        · @L["Suggested by {0}", r.SuggestedBy]
+                    </div>
+                </div>
+                @if (!r.Approved)
+                {
+                    <button type="button" class="btn btn-sm btn-success" disabled="@busy" @onclick="() => ReviewRemoval(r.PlaceId, true)">✅ @L["Approve"]</button>
+                }
+                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@busy" @onclick="() => ReviewRemoval(r.PlaceId, false)">
+                    @(r.Approved ? L["Put back"] : L["Reject"])
+                </button>
+            </li>
+        }
+    </ul>
+}
+
+@if (GoogleSignIn.IsOn(Config))
+{
+    <h2 class="h5 mt-5 mb-1">@L["Who can vote"] <span class="badge text-bg-light border fw-normal small align-middle">● @L["live"]</span></h2>
+    <p class="form-text mt-0">@L["Everyone who signed in with Google. Only the ones you allow can vote, add options or create a poll; the others can only look."]</p>
+    @if (GoogleSignIn.AutoApproveNames(Config) is { Count: > 0 } listed)
+    {
+        <div class="card card-body py-2 mb-3">
+            <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold me-auto">@L["Auto-approve the regulars"]</span>
+                @if (autoApprove)
+                {
+                    <span class="badge text-bg-success">@L["Active"]</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@busy" @onclick="() => SetAutoApprove(false)">@L["Disable"]</button>
+                }
+                else
+                {
+                    <span class="badge text-bg-secondary">@L["Disabled"]</span>
+                    <button type="button" class="btn btn-sm btn-outline-success" disabled="@busy" @onclick="() => SetAutoApprove(true)">@L["Activate"]</button>
+                }
+            </div>
+            <div class="form-text">@L["Allowed automatically on their first sign-in (Google:AutoApprove in appsettings.json): {0}", string.Join(", ", listed)]</div>
+            @if (!autoApprove) { <div class="form-text">@L["While disabled, they wait for approval like everyone else. People already allowed keep voting."]</div> }
+        </div>
+    }
+    @if (accounts.Count == 0)
+    {
+        <p class="text-muted">@L["Nobody has signed in yet."]</p>
+    }
+    else
+    {
+        <ul class="list-group" aria-live="polite">
+            @foreach (var a in accounts)
+            {
+                <li class="list-group-item d-flex align-items-center gap-2" @key="a.Id">
+                    <div class="me-auto">
+                        <span class="fw-semibold">@a.Name</span>
+                        @if (!a.Approved) { <span class="badge text-bg-warning ms-1">@L["waiting"]</span> }
+                        <div class="small text-muted">@a.Email</div>
+                    </div>
+                    @if (a.Approved)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@busy" @onclick="() => SetApproved(a.Id, false)">@L["Stop voting"]</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-success" disabled="@busy" @onclick="() => SetApproved(a.Id, true)">✅ @L["Allow voting"]</button>
+                    }
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    IReadOnlyList<PlaceSuggestion> placeSuggestions = [];
+    IReadOnlyList<DishSuggestion> dishSuggestions = [];
+    IReadOnlyList<PlaceRemoval> placeRemovals = [];
+    IReadOnlyList<AccountVoter> accounts = [];
+    bool autoApprove = true, busy;
+    string? error;
+
+    // Events arrive on other threads with another culture; put this viewer's back before rendering (as on the poll page).
+    readonly CultureInfo culture = CultureInfo.CurrentCulture, uiCulture = CultureInfo.CurrentUICulture;
+
+    static string MapUrl(double lat, double lng) =>
+        string.Create(CultureInfo.InvariantCulture, $"https://www.openstreetmap.org/?mlat={lat}&mlon={lng}#map=19/{lat}/{lng}");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        Places.SuggestionsChanged += OnChanged;
+        Dishes.SuggestionsChanged += OnChanged;
+        Sessions.VotersChanged += OnChanged;
+    }
+
+    async Task LoadAsync()
+    {
+        placeSuggestions = await Places.GetSuggestedPlacesAsync();
+        dishSuggestions = await Dishes.GetSuggestedDishesAsync();
+        placeRemovals = await Places.GetRemovalsAsync();
+        if (GoogleSignIn.IsOn(Config)) accounts = await Sessions.GetAccountVotersAsync();
+        autoApprove = (await Sessions.GetGroupAsync(Defaults.Code))?.AutoApprove ?? true;
+    }
+
+    void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        CultureInfo.CurrentCulture = culture;
+        CultureInfo.CurrentUICulture = uiCulture;
+        try
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Refreshing the review list failed"); }
+    });
+
+    Task ReviewPlace(string id, bool approve) => Do(async () =>
+    {
+        // A suggested place's own dishes go with it: approved together, or deleted together.
+        foreach (var d in dishSuggestions.Where(d => d.PlaceId == id && !d.Remove && (!approve || !d.Approved)))
+            await Dishes.ReviewDishAsync(d.Id, approve);
+        return await Places.ReviewPlaceAsync(id, approve);
+    });
+
+    Task ReviewDish(Guid id, bool approve) => Do(() => Dishes.ReviewDishAsync(id, approve));
+
+    Task ReviewRemoval(string placeId, bool approve) => Do(() => Places.ReviewRemovalAsync(placeId, approve));
+
+    Task SetApproved(string voterId, bool approved) => Do(async () =>
+    {
+        await Sessions.SetVoterApprovedAsync(Defaults.Code, voterId, approved);
+        return true;
+    });
+
+    Task SetAutoApprove(bool on) => Do(async () =>
+    {
+        if (await Sessions.GetGroupAsync(Defaults.Code) is not { } group) return false;
+        await Sessions.UpdateGroupAsync(group with { AutoApprove = on });
+        return true;
+    });
+
+    /// <summary>Runs one review action; false or a validation error means the list was stale (someone else got there first).</summary>
+    async Task Do(Func<Task<bool>> action)
+    {
+        busy = true; error = null;
+        try
+        {
+            if (!await action()) error = L["That didn't work. Reload the page and try again."];
+        }
+        catch (ArgumentException ex)
+        {
+            Log.LogInformation(ex, "Review action rejected");
+            error = L["That didn't work. Reload the page and try again."];
+        }
+        finally { busy = false; }
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        Places.SuggestionsChanged -= OnChanged;
+        Dishes.SuggestionsChanged -= OnChanged;
+        Sessions.VotersChanged -= OnChanged;
+    }
+}
