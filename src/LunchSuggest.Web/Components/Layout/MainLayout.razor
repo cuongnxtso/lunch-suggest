@@ -1,14 +1,18 @@
 ﻿@inherits LayoutComponentBase
 @inject NavigationManager Nav
+@inject ILunchSessions Sessions
+@inject GroupSettings Defaults
 
 <nav class="navbar navbar-dark bg-dark mb-3">
     <div class="container">
-        <a class="navbar-brand" href="">🍜 LunchSuggest</a>
+        <a class="navbar-brand" href="">🍜 @siteTitle</a>
         <div class="btn-group btn-group-sm" role="group" aria-label="@L["Language"]">
-            <button class="btn @(IsCurrent("vi") ? "btn-light" : "btn-outline-light")" aria-pressed="@(IsCurrent("vi") ? "true" : "false")"
-                    lang="vi" @onclick='() => Switch("vi")'>Tiếng Việt</button>
-            <button class="btn @(IsCurrent("en") ? "btn-light" : "btn-outline-light")" aria-pressed="@(IsCurrent("en") ? "true" : "false")"
-                    lang="en" @onclick='() => Switch("en")'>English</button>
+            @* Plain links (target="_top" so Blazor doesn't intercept them): they work on live and static pages alike.
+               The cookie is set by a normal request, and the reload starts the page again in the new language. *@
+            <a class="btn @(IsCurrent("vi") ? "btn-light" : "btn-outline-light")" aria-current="@(IsCurrent("vi") ? "true" : null)"
+               lang="vi" target="_top" href="@SwitchUrl("vi")">Tiếng Việt</a>
+            <a class="btn @(IsCurrent("en") ? "btn-light" : "btn-outline-light")" aria-current="@(IsCurrent("en") ? "true" : null)"
+               lang="en" target="_top" href="@SwitchUrl("en")">English</a>
         </div>
     </div>
 </nav>
@@ -24,13 +28,14 @@
 </div>
 
 @code {
+    public const string DefaultSiteTitle = "LunchSuggest";
+    string siteTitle = DefaultSiteTitle;
+
+    // Set on the Settings page; pages already open show a new title after a reload.
+    protected override async Task OnInitializedAsync() =>
+        siteTitle = (await Sessions.GetGroupAsync(Defaults.Code))?.SiteTitle ?? DefaultSiteTitle;
+
     static bool IsCurrent(string culture) => System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == culture;
 
-    // The cookie is set by a normal request; the reload starts the page again in the new language.
-    void Switch(string culture)
-    {
-        if (IsCurrent(culture)) return;
-        var back = "/" + Nav.ToBaseRelativePath(Nav.Uri);
-        Nav.NavigateTo($"culture/{culture}?redirect={Uri.EscapeDataString(back)}", forceLoad: true);
-    }
+    string SwitchUrl(string culture) => $"culture/{culture}?redirect={Uri.EscapeDataString("/" + Nav.ToBaseRelativePath(Nav.Uri))}";
 }

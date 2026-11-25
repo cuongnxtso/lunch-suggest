@@ -11,7 +11,6 @@ namespace LunchSuggest.Web;
 /// </summary>
 public sealed class TodayPicker(ILunchSessions sessions, IDishGuide dishes, ILogger<TodayPicker> log)
 {
-    internal const int MinPicks = 3, MaxPicks = 5, RunnerUpDays = 5;
     static readonly TimeSpan GiveUpAfter = TimeSpan.FromMinutes(2);
 
     // One run per poll at a time: everyone who opens the page meanwhile waits on the same run.
@@ -36,10 +35,17 @@ public sealed class TodayPicker(ILunchSessions sessions, IDishGuide dishes, ILog
     {
         var poll = await sessions.GetAsync(code, day, null, ct);
         if (poll is not { HasPoll: true, Seeded: false } || nearby.Count == 0) return;
+        if (await sessions.GetGroupAsync(code, ct) is not { } group) return;
 
-        var count = Random.Shared.Next(MinPicks, MaxPicks + 1);
+        // How many dishes the app adds is a group setting (the Settings page).
+        var count = Random.Shared.Next(group.PicksMin, group.PicksMax + 1);
+        if (count == 0)
+        {
+            await sessions.SeedPollAsync(code, day, [], [], CancellationToken.None); // "start empty": mark it done, add nothing
+            return;
+        }
         // Leave at least one slot for something new.
-        var runnerUps = (await sessions.GetRecentRunnerUpsAsync(code, day, RunnerUpDays, ct)).Take(count - 1).ToList();
+        var runnerUps = (await sessions.GetRecentRunnerUpsAsync(code, day, group.RunnerUpDays, ct)).Take(count - 1).ToList();
         var need = count - runnerUps.Count;
 
         // Random places (not just the nearest), one dish each for variety. A couple of spares in case a place has no dishes online.

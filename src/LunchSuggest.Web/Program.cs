@@ -24,8 +24,9 @@ builder.Services
     .AddVotingModule(builder.Configuration)
     .AddDishesModule(builder.Configuration);
 builder.Services.AddSingleton<LunchSuggest.Web.TodayPicker>();
+builder.Services.AddGoogleSignIn(builder.Configuration);
 
-// The one lunch group this app runs, from the "Lunch" settings section.
+// The one lunch group this app runs. The "Lunch" settings section creates it; the Settings page edits it afterwards.
 var group = builder.Configuration.GetSection("Lunch").Get<GroupSettings>()
     ?? throw new InvalidOperationException("Missing the 'Lunch' settings section (group name, location, radius, time zone).");
 builder.Services.AddSingleton(group);
@@ -39,6 +40,13 @@ await app.Services.MigrateVotingModuleAsync();
 await app.Services.MigrateDishesModuleAsync();
 await app.Services.GetRequiredService<ILunchSessions>().EnsureGroupAsync(group);
 
+// The ngrok tunnel (HTTPS) talks plain http to this container and says "X-Forwarded-Proto: https". Trust that, so sign-in
+// builds https return addresses and secure cookies. Only the scheme is taken; the Settings check goes by port, not caller IP.
+var forwarded = new ForwardedHeadersOptions { ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto };
+forwarded.KnownIPNetworks.Clear(); // the tunnel's address isn't known in advance
+forwarded.KnownProxies.Clear();
+app.UseForwardedHeaders(forwarded);
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -46,6 +54,19 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
+
+// Settings (page and form posts) only for this computer; everyone else gets a plain 404, so it isn't even advertised.
+var adminPort = app.Configuration.GetValue<int?>("Admin:Port");
+app.Use(async (http, next) =>
+{
+    if (http.Request.Path.StartsWithSegments(AdminAccess.Path)
+        && !AdminAccess.IsAllowed(http.Connection.RemoteIpAddress, http.Connection.LocalPort, adminPort))
+    {
+        http.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+    await next();
+});
 
 // Vietnamese unless the visitor picked English in the header (cookie). The browser's language is ignored on purpose.
 // Blazor Server keeps the culture of the request that opened the page, so switching reloads the page.
@@ -56,7 +77,9 @@ var localization = new RequestLocalizationOptions()
 localization.RequestCultureProviders = [new CookieRequestCultureProvider()];
 app.UseRequestLocalization(localization);
 
+if (GoogleSignIn.IsOn(app.Configuration)) app.UseAuthentication();
 app.UseAntiforgery();
+app.MapGoogleSignIn();
 
 app.MapGet("/culture/{culture}", (string culture, string? redirect, HttpContext http) =>
 {
@@ -64,9 +87,7 @@ app.MapGet("/culture/{culture}", (string culture, string? redirect, HttpContext 
     http.Response.Cookies.Append(CookieRequestCultureProvider.DefaultCookieName,
         CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(culture)),
         new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, HttpOnly = true, SameSite = SameSiteMode.Lax });
-    // Only back to a page on this site, never an open redirect.
-    var local = redirect is { Length: > 0 } && redirect[0] == '/' && !redirect.StartsWith("//") && !redirect.StartsWith("/\\");
-    return Results.LocalRedirect(local ? redirect! : "/");
+    return Results.LocalRedirect(GoogleSignIn.LocalOrHome(redirect));
 });
 
 app.MapStaticAssets();

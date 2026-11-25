@@ -1,0 +1,78 @@
+@page "/history"
+@* Read-only list: a plain page, no live connection needed. *@
+@attribute [ExcludeFromInteractiveRouting]
+@using System.Globalization
+@inject ILunchSessions Sessions
+@inject GroupSettings Defaults
+
+<PageTitle>@L["Poll history"]</PageTitle>
+
+<div class="d-flex align-items-center mb-3">
+    <h1 class="h3 mb-0 me-auto">📜 @L["Poll history"]</h1>
+    <a class="btn btn-outline-primary btn-sm" href="today">@L["← Back to today"]</a>
+</div>
+
+@if (polls is null)
+{
+    <p class="text-muted">@L["Loading…"]</p>
+}
+else if (polls.Count == 0)
+{
+    <p class="text-muted">@L["No polls yet."]</p>
+}
+else
+{
+    <ul class="list-group">
+        @foreach (var p in polls)
+        {
+            <li class="list-group-item d-flex gap-3 align-items-start">
+                <span class="history-icon" aria-hidden="true">@(p.Winner is { } i ? DishIcon.For(i.Dish, i.Name, i.Cuisine) : p.Closed ? "🤷" : "🗳️")</span>
+                <div class="flex-grow-1">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <a class="fw-semibold" href="poll/@p.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)">@p.Day.ToString(L["dddd d MMM"].Value, CultureInfo.CurrentCulture)</a>
+                        @if (!p.Closed) { <span class="badge text-bg-success">@L["Voting open"]</span> }
+                        @if (p.CreatedBy != "app") @* "app" = polls from before the Create button existed *@
+                        {
+                            <span class="small text-muted ms-auto">@L["Poll created by {0}", p.CreatedBy]</span>
+                        }
+                    </div>
+                    @if (p.Winner is { } w)
+                    {
+                        <div>🏆 <strong>@Title(w)</strong> <span class="small text-muted">· @Reason(w)</span></div>
+                    }
+                    else if (p.Closed)
+                    {
+                        <div class="text-muted">@L["No winner: the poll had no options."]</div>
+                    }
+                    @if (p.RunnerUp is { } r)
+                    {
+                        <div class="small">@L["Runner-up:"] @Title(r) (@Votes(r.VoterNames.Count))</div>
+                    }
+                    <div class="small text-muted">
+                        @if (p.Voters.Count == 0) { @L["Nobody has voted yet."] }
+                        else { <span>🙋 @L["Voters ({0}):", p.Voters.Count] @string.Join(", ", p.Voters)</span> }
+                    </div>
+                </div>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    IReadOnlyList<PollSummary>? polls;
+
+    protected override async Task OnInitializedAsync() => polls = await Sessions.GetHistoryAsync(Defaults.Code);
+
+    string Title(CandidateView c) => c.Dish is null ? c.Name : $"{c.Dish} {L["at"]} {c.Name}";
+
+    string Votes(int n) => n == 1 ? L["1 vote"] : L["{0} votes", n];
+
+    // Same wording as the result screen on the poll page.
+    string Reason(CandidateView w) => w.PickedBy switch
+    {
+        CandidateSource.Dice when w.VoterNames.Count == 0 => L["Nobody voted, so the dice chose."],
+        CandidateSource.Dice => L["Tied at {0}, so the dice broke the tie.", Votes(w.VoterNames.Count)],
+        { } by => L["Picked at random by {0}.", by],
+        null => Votes(w.VoterNames.Count),
+    };
+}

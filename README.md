@@ -56,21 +56,106 @@ dotnet run --project src/LunchSuggest.Web
 ## Daily flow
 
 1. **`/`: one big "Choose meal" button.** Its food icon changes every day (🍜 phở is in the set), the same for everyone, at the group's midnight. It opens **`/today`**, which is also the link to share.
-2. **"➕ Create new poll", one poll a day.** Anyone who has entered a name can create a poll. Before the deadline it's for **today**; after the deadline it's for **tomorrow**. If that day already has a poll, the button becomes "Open tomorrow's poll →" (one poll per day is enforced by the database key too). Polls live at `/today` and `/poll/yyyy-MM-dd`. Tomorrow's poll can be voted on until tomorrow's deadline, and past days show their result.
+2. **"➕ Create new poll", one poll a day.** Anyone who has entered a name can create a poll. Before the deadline it's for **today**; after the deadline it's for **the next weekday**. **Polls run Monday to Friday only:** after Friday's deadline, or any time on Saturday or Sunday, the button makes Monday's poll, and a weekend `/today` shows "No lunch poll on weekends". The polls that can still change are today's and the next weekday's (so Monday's can be voted on from Friday afternoon). **Public holidays** (Settings → Poll → *Public holidays*, dates like `24/11/2026`) are skipped the same way: no poll that day, `/today` shows "Public holiday: no lunch poll", and the button jumps to the next working day. The rule is `PollDays` in [VotingModule.cs](src/Modules/Voting/VotingModule.cs); the holidays are stored on the group row. If that day already has a poll, the button becomes "Open tomorrow's poll →" (one poll per day is enforced by the database key too). Polls live at `/today` and `/poll/yyyy-MM-dd`. Tomorrow's poll can be voted on until tomorrow's deadline, and past days show their result.
 3. **A new poll's picks.** Right after creation the poll gets 3–5 dishes (with a spinner meanwhile): recent runner-ups (up to `count - 1`) plus random dishes from random nearby places. Places with nothing found online go in as the place itself. Lookups for these go ahead of the list's background lookups. The first time in a new area takes about a minute, then it's mostly cached.
 4. **Deadline (11:30 by default).** The page counts down ("⏰ Voting closes at 11:30 · 25 min left") and switches to the result at the deadline without a reload. After it, the server rejects adding options, votes and random picks. Anyone opening `/today` later sees only the result: a large icon for the dish (🍜 phở/bún, 🍚 cơm, 🍲 lẩu, 🥖 bánh mì…, see [DishIcon.cs](src/LunchSuggest.Web/DishIcon.cs)), where to eat, why it won, a Google Maps directions link and the runner-up. The winner is a random pick if someone made one, else the most votes. A tie, or a day with no votes, is settled once by the dice and saved, so everyone sees the same result. A day without a poll shows "No poll for today yet" and the create button.
 5. **Results are stored.** As soon as a poll has closed (for example when tomorrow's poll is created at 2 PM), its **winner** and **runner-up** are saved in `voting."DayResults"` with their vote counts, so tomorrow's picks already include today's runner-up. The winner is the random pick, or else the most-voted option. The runner-up is the most-voted other option (at least 1 vote). The next days' picks take runner-ups from that table: last 5 days, newest first, skipping anything the group has eaten since. Logic: `LunchSessions.Outcome` / `PickRunnerUps`, unit tested.
 
 ## Names and languages
 
-- **Voter names are random**, e.g. *Chilling Capybara*, or in Vietnamese *Chuột Lang Nước Thư Thái*: Vietnamese puts the animal first, English the personality. A name is created on the first visit, kept in the browser, and can be re-rolled with **🎲 New name**. Lists: [VoterNames.cs](src/LunchSuggest.Web/VoterNames.cs).
+- **Voter names are random**, e.g. *Chilling Capybara*, or in Vietnamese *Chuột Lang Nước Thư Thái*: Vietnamese puts the animal first, English the personality. A name is created on the first visit, kept in the browser, and can be re-rolled with **🎲 New name** until the first vote. Names are saved on the server too (`voting."Voters"`, unique), so no two people share one: a name that's taken is re-rolled. The first vote fixes the name, and every later vote by that browser uses the server's copy.
+- **One vote per person per poll.** Voting for another option moves the vote there; pressing **Voted** again takes it back. **🎲 Random pick** also casts the picker's vote for the pick (moving any earlier vote). Under the poll, **🙋 Voters (n):** lists everyone who has voted. Votes, picks and new options show up on every open page right away, without a reload (Blazor Server's SignalR connection).
+- **Map colors:** grey = nearby place, blue = poll option, green = the option you voted for, red = the random pick, orange = the place you clicked (📍 name) in the list; click it again to clear. Lists: [VoterNames.cs](src/LunchSuggest.Web/VoterNames.cs).
 - **Vietnamese by default**, with a Tiếng Việt / English switch in the header (saved in a cookie for a year). The browser's language is ignored on purpose.
 - Text lives in `L["English text"]` calls; the English text is the key, so only [Resources/SharedResource.vi.resx](src/LunchSuggest.Web/Resources/SharedResource.vi.resx) is needed. A unit test fails if any page uses text with no Vietnamese entry, if a translation drops a `{0}` placeholder, or if two keys differ only by upper/lower case (.NET resources would mix those up). Dates use translated patterns too (`Thứ Ba, 17/11`).
 - To add a language: add it to `SharedResource.Cultures`, add a `SharedResource.<lang>.resx`, and add a button in `MainLayout.razor`.
 
+## Suggesting places and dishes
+
+The map data misses places, and the dish lookup misses dishes, so people can add them. Both wait for your approval.
+
+- **➕ Suggest a place** (above the place list):
+  - Click the map where the place is (a purple pin; click again to move it), type its name, and optionally the cuisine, address and a few good dishes separated by commas.
+  - It must be within the walking radius, or it would never show up in the list.
+- **＋ Suggest a dish** (under any place): type one dish. Drinks are refused (food only).
+- **🚫 Suggest a removal** (under any place): pick the whole place (closed, wrong, not a food place) or one of its dishes. Once approved it disappears for everyone: from the nearby list, the search and the app's own picks. Options already in a poll stay there.
+- **Who can suggest:** the same people who can vote. With sign-in on, that's signed-in, allowed people.
+- **Review** under **Suggested places and dishes** on the Settings page:
+  - **Approve** or **Reject** each suggestion. Approving a place also approves the dishes sent with it.
+  - **Remove** takes an approved one away again; **Put back** undoes an approved removal.
+  - For dishes the latest approved decision wins: approving "add Phở gà" cancels an earlier approved "remove Phở gà", and the other way round.
+  - The review lists (suggestions and **Who can vote**) update live: new suggestions and sign-ins appear without reloading Settings.
+  - They're a small interactive part (`ReviewQueue.razor`, over Blazor's SignalR connection) inside the otherwise static Settings page. Only this computer is served that page, so no other browser can start it.
+- **Once approved:**
+  - A place joins the nearby list for everyone (with a 👥 *suggested* badge), the semantic search and the app's own picks. Pages already open show it right away.
+  - A dish comes first in that place's dish list and shows on open pages right away.
+- **Where it's stored:**
+  - Places: `places."SuggestedPlaces"`. They stay when you change the place provider, and are never touched by the provider cache.
+  - Dishes: `dishes."SuggestedDishes"`. They don't expire like the 30-day lookup cache.
+  - Every suggestion is logged with who sent it.
+
+## Sign-in (Google)
+
+Off by default: anyone with the link votes under a random name. Turn it on when the link gets shared in a big group chat and people who aren't coming to lunch start voting. Then:
+
+- **Anyone with the link can still view** the poll, the map, the places and the results. They see **Sign in with Google** instead of working buttons.
+- **After signing in, people wait for you.** Everyone who signs in shows up under **Who can vote** on the Settings page (this computer only) with their Google name and e-mail. Click **Allow voting** once per person; their open page unlocks at once. **Stop voting** takes it back, and that takes effect on their next click.
+- **Regulars skip the wait.** `Google:AutoApprove` in [appsettings.json](src/LunchSuggest.Web/appsettings.json) lists names that are allowed on their first sign-in. A name matches the Google display name, ignoring accents, case and word order: *Dao Dinh Luyen* and *Luyện Đào Đình* both match *Đào Đình Luyện*. This only happens on the first sign-in, so **Stop voting** on the Settings page sticks. Anyone can set any display name on their Google account, so check new names in **Who can vote** now and then. Edit the list and run `docker compose up -d --build web`; it doesn't approve accounts that have already signed in. The list is temporary: switch it **Active / Disabled** under **Who can vote** on the Settings page, with no redeploy. While it's disabled, everyone waits for approval; people already allowed keep voting.
+- **Only allowed people can vote, add options, use 🎲 Random pick or create a poll.** The server checks this for every action, not just the disabled buttons.
+- **The voter name is the Google display name** and can't be changed (no 🎲 New name). If someone else already has that name, it becomes "Name 2". E-mails are only shown on the Settings page, never on polls.
+- Sign-in lasts 30 days on that browser. **Sign out** signs out of this site only, not out of Google.
+
+To turn it on:
+
+1. **HTTPS via ngrok.** Google doesn't accept a sign-in return address like `http://10.3.0.54:8686`, so the site needs HTTPS. The `ngrok` service in `docker-compose.yml` gives it a fixed public HTTPS address.
+   - Sign up at ngrok.com (the free plan is enough).
+   - Copy **Your Authtoken**, and claim your free **static domain** under Domains, e.g. `lunch-xyz.ngrok-free.app`.
+2. **Google OAuth client.** In Google Cloud Console (any Google account works):
+   1. Create a project.
+   2. Set up the **OAuth consent screen**: External, an app name, your e-mail.
+   3. Click **Publish app** so it's *In production*. In *Testing* mode, only test users you list can sign in. The app only asks for name and e-mail, so Google doesn't need to verify it.
+   4. Under **Credentials**, create an OAuth client ID of type *Web application* with the authorized redirect URI `https://<your ngrok domain>/signin-oidc`.
+3. **Fill in `.env`.** Copy [.env.example](.env.example) to `.env` (git ignores it) and fill in the ngrok and Google values. Then run `docker compose up -d`; `COMPOSE_PROFILES=ngrok` in `.env` starts the tunnel with the site.
+4. **On the Settings page** (http://localhost:8690/settings):
+   - Set **Share link address** to `https://<your ngrok domain>`. Everyone must use that address: signing in from `http://10.3.0.54:8686` fails, because Google only sends people back to the registered address.
+   - Sign in yourself on the poll page, then allow yourself under **Who can vote**.
+
+If `ClientId` is set but `ClientSecret` is missing, the app refuses to start. For `dotnet run`, set the environment variables `Google__ClientId` and `Google__ClientSecret`.
+
+About ngrok:
+- **Don't start the tunnel before the Google values are in `.env`.** Without sign-in, anyone on the internet could vote.
+- **The poll becomes reachable from the internet.** Anyone with the link can view it, but only people you allow can vote.
+- **Settings stays on this computer only.** It runs on port 8081, which the tunnel doesn't forward.
+- **Free ngrok shows a "You are about to visit…" page** the first time each browser opens the link; click **Visit Site**.
+- **Google returns people to the site with a plain GET**, not a form POST, so that page can't interrupt sign-in.
+- **The app trusts the tunnel's `X-Forwarded-Proto` header** (only the scheme), so it knows it's being served over HTTPS.
+- **The free plan has monthly traffic limits.** Map tiles don't go through the tunnel.
+
+Votes cast anonymously before sign-in was turned on keep their random names. Code: [GoogleSignIn.cs](src/LunchSuggest.Web/GoogleSignIn.cs); approvals are the `Approved`/`Email` columns of `voting."Voters"`.
+
 ## Settings
 
-The lunch group comes from the `Lunch` section of [appsettings.json](src/LunchSuggest.Web/appsettings.json). Default: **Khách sạn Thể Thao (Sport Hotel), 15 Lê Văn Thiêm, Thanh Xuân, Hà Nội**, 300 m, `Asia/Ho_Chi_Minh`. Change it and restart; polls and history stay. Any setting can also be overridden with environment variables, e.g. `Lunch__RadiusMeters=500`.
+Edit everything on the **Settings page**. Saving takes effect at once; pages that are already open pick up changes after a reload.
+
+| Section | Setting | Default |
+|---|---|---|
+| Lunch group | Group name, address, latitude / longitude, walking radius (100–5000 m), voting deadline, time zone | Sport Hotel, 300 m, 11:30, `Asia/Ho_Chi_Minh` |
+| Display | **Site title**: top bar and browser tab | LunchSuggest |
+| Display | **Landing button icon**: one emoji, or empty for a different food icon every day | empty (daily) |
+| Display | **Share link address**: what the invite box and "Copy invite link" use, plus the page path. Needed because the app can't see the LAN IP from inside Docker. Empty = the viewer's own address | `http://10.3.0.54:8686` (from `docker-compose.yml`) |
+| Poll | **Max options per poll** (2–20), including the app's picks | 8 |
+| Poll | **Dishes the app adds to a new poll**, at least / at most (0–8; 0 = start empty). Each new dish can take ~10 s to look up | 3–5 |
+| Poll | **Runner-up look-back days** (0 = off) | 5 |
+
+- **Docker:** http://localhost:8690/settings, **only from this computer**. Port 8690 is published on the host's `127.0.0.1` only, so LAN machines can't connect to it, and `/settings` on the shared port 8686 answers 404 for everyone. A port is used rather than an IP check because Docker Desktop hides callers' real IPs from the container. `Admin:Port` (8081 inside the container) turns this on; see `docker-compose.yml`.
+- **`dotnet run`:** http://localhost:5063/settings, only from loopback addresses (127.0.0.1 / ::1).
+- The page is a plain server-rendered form with an antiforgery token (`[ExcludeFromInteractiveRouting]`), so every view and save is a real request that goes through the check. The rule lives in [AdminAccess.cs](src/LunchSuggest.Web/AdminAccess.cs) and is unit tested.
+
+The `Lunch` section of [appsettings.json](src/LunchSuggest.Web/appsettings.json) only gives the **first** values, used when the group is created. Default: **Khách sạn Thể Thao (Sport Hotel), 15 Lê Văn Thiêm, Thanh Xuân, Hà Nội**, 300 m, `Asia/Ho_Chi_Minh`, deadline 11:30. After that the database is the source of truth, and editing the file doesn't override the Settings page.
+
+The poll heading shows how full it is (*6/8*), and the add buttons are disabled once it reaches the max options. Lowering the max doesn't remove options from a poll that already has more.
+
+**Reset a poll** (bottom of the Settings page) deletes today's or tomorrow's poll with all its options, votes and random pick, after a browser confirmation. Pages that have it open switch to "no poll yet", and anyone can create a fresh one. **Only open polls can be reset:** once the deadline has passed, the poll and its result stay in history (the Settings page shows 🔒 instead of the button), and older polls are history too, since runner-ups come from it. Every reset is logged as a warning with the day and how many options and votes were deleted (`docker compose logs web | grep reset`); the log starts over when the container is recreated.
 
 | Key | Meaning |
 |---|---|
@@ -83,6 +168,10 @@ The lunch group comes from the `Lunch` section of [appsettings.json](src/LunchSu
 The orchestration lives in the host ([TodayPicker.cs](src/LunchSuggest.Web/TodayPicker.cs)) because it combines three modules through their public interfaces.
 
 ## "What dish should we eat?"
+
+**Poll history** (`/history`, the 📜 link on the poll page) lists every poll newest first: date (links to that day's poll), winner with an icon and why it won, runner-up, and who voted. Open polls show "Voting open". Opening it settles any unsettled past day first, like the poll page does, so both show the same winner.
+
+**Food only.** Drink-only places (cafés, coffee and bubble-tea shops, juice and wine bars: `FoodCategory.IsDrinkOnly`) and drinks in dish lists (cà phê…, trà…, bia…, …coffee: `DishExtractor.IsDrink`) are left out, filtered on read so cached data obeys too. Restaurants with "Beer" or "Cafe" in their name that serve meals stay.
 
 Each listed place shows its top dishes as chips. Clicking one adds "*dish* at *place*" to today's poll, and votes and the random pick work on those. The 8 places at the top of the list are looked up automatically; the others have a **Find top dishes** button.
 

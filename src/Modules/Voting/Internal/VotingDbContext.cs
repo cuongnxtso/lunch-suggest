@@ -13,6 +13,16 @@ internal sealed class LunchSession
     public int RadiusMeters { get; set; }
     public string TimeZone { get; set; } = "";   // IANA id; "" = server time
     public TimeOnly? Deadline { get; set; }       // local time each day's poll closes; null = never
+    public string? Address { get; set; }          // meeting point, for display
+    public string? SiteTitle { get; set; }        // top bar / browser tab; null = "LunchSuggest"
+    public string? LandingIcon { get; set; }      // landing button emoji; null = a different one each day
+    public int MaxOptions { get; set; } = GroupSettings.DefaultMaxOptions;
+    public int PicksMin { get; set; } = 3;        // dishes the app puts in a new poll
+    public int PicksMax { get; set; } = 5;
+    public int RunnerUpDays { get; set; } = 5;
+    public string? ShareUrl { get; set; }         // "http://10.3.0.54:8686" for invite links; null = viewer's own address
+    public bool AutoApprove { get; set; } = true; // sign-in on: the configured regulars may vote on first sign-in
+    public List<DateOnly> Holidays { get; set; } = []; // public holidays: no poll (Postgres date[])
     public DateTimeOffset CreatedAt { get; set; }
     public List<Candidate> Candidates { get; set; } = [];
 }
@@ -52,6 +62,16 @@ internal sealed class Vote
     public required string VoterName { get; set; }
 }
 
+/// <summary>A voter's saved name: unique across voters, fixed by their first vote.</summary>
+internal sealed class Voter
+{
+    public required string Id { get; set; }   // the random id kept in the voter's browser
+    public required string Name { get; set; }
+    public bool Locked { get; set; }          // set by the first vote; stays even if they take every vote back
+    public string? Email { get; set; }        // signed-in (Google) voters only; shown on the Settings page, never on polls
+    public bool Approved { get; set; }        // with sign-in on, only approved voters can vote (ticked on the Settings page)
+}
+
 /// <summary>How a finished day ended: what the group ate (1st) and what came 2nd. Recorded once the day is over.</summary>
 internal sealed class DayResult
 {
@@ -89,6 +109,7 @@ internal sealed class VotingDbContext(DbContextOptions<VotingDbContext> options)
     public DbSet<Vote> Votes => Set<Vote>();
     public DbSet<DayResult> DayResults => Set<DayResult>();
     public DbSet<Poll> Polls => Set<Poll>();
+    public DbSet<Voter> Voters => Set<Voter>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -99,6 +120,15 @@ internal sealed class VotingDbContext(DbContextOptions<VotingDbContext> options)
             e.Property(x => x.Code).HasMaxLength(16);
             e.Property(x => x.Title).HasMaxLength(LunchSessions.MaxTitle);
             e.Property(x => x.TimeZone).HasMaxLength(64).HasDefaultValue("");
+            e.Property(x => x.Address).HasMaxLength(LunchSessions.MaxAddress);
+            e.Property(x => x.SiteTitle).HasMaxLength(LunchSessions.MaxSiteTitle);
+            e.Property(x => x.LandingIcon).HasMaxLength(LunchSessions.MaxIcon);
+            e.Property(x => x.ShareUrl).HasMaxLength(200);
+            // Defaults so the existing group gets today's values when the columns are added.
+            e.Property(x => x.MaxOptions).HasDefaultValue(GroupSettings.DefaultMaxOptions);
+            e.Property(x => x.PicksMin).HasDefaultValue(3);
+            e.Property(x => x.PicksMax).HasDefaultValue(5);
+            e.Property(x => x.RunnerUpDays).HasDefaultValue(5);
             e.HasMany(x => x.Candidates).WithOne().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<Poll>(e =>
@@ -121,6 +151,13 @@ internal sealed class VotingDbContext(DbContextOptions<VotingDbContext> options)
         {
             e.HasKey(x => new { x.CandidateId, x.VoterId });
             e.Property(x => x.VoterName).HasMaxLength(LunchSessions.MaxName);
+        });
+        b.Entity<Voter>(e =>
+        {
+            e.Property(x => x.Id).HasMaxLength(64);
+            e.Property(x => x.Name).HasMaxLength(LunchSessions.MaxName);
+            e.HasIndex(x => x.Name).IsUnique(); // no two voters with the same name
+            e.Property(x => x.Email).HasMaxLength(LunchSessions.MaxEmail);
         });
         b.Entity<DayResult>(e =>
         {
